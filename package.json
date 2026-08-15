@@ -1,0 +1,15 @@
+{
+  "name": "mdc-bot",
+  "version": "1.0.0",
+  "description": "MDC Hub Discord Bot - Verify, Roblox Linking & Moderation",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
