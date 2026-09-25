@@ -65,11 +65,6 @@ const commands = [
     )
 ].map(cmd => cmd.toJSON());
 
-client.on('debug', (info) => {
-  if (info.includes('Heartbeat') || info.includes('heartbeat')) return;
-  console.log('[debug]', info);
-});
-
 client.on('warn', (info) => console.log('[warn]', info));
 client.on('error', (err) => console.error('[client error]', err));
 client.on('shardError', (err) => console.error('[shard error]', err));
@@ -244,12 +239,21 @@ if (!TOKEN) {
 }
 
 console.log(`Token loaded. Length: ${TOKEN.length}`);
-console.log(`Token starts with: ${TOKEN.slice(0, 4)}...`);
+console.log(`Node version: ${process.version}`);
 
-client.login(TOKEN)
-  .then(() => {
+(async () => {
+  try {
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
+    const me = await rest.get(Routes.user('@me'));
+    console.log(`REST token OK. Bot user: ${me.username}#${me.discriminator || '0'}`);
+  } catch (err) {
+    console.error('REST token check failed:', err && err.message ? err.message : err);
+  }
+
+  try {
+    await client.login(TOKEN);
     console.log('client.login resolved');
-  })
-  .catch((err) => {
+  } catch (err) {
     console.error('LOGIN FAILED:', err && err.message ? err.message : err);
-  });
+  }
+})();
