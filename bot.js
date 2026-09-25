@@ -1,3 +1,4 @@
+const http = require('http');
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 const client = new Client({
@@ -19,6 +20,7 @@ function cleanEnv(value) {
 const TOKEN = cleanEnv(process.env.TOKEN || process.env.DISCORD_TOKEN);
 const CLIENT_ID = cleanEnv(process.env.CLIENT_ID);
 const GUILD_ID = cleanEnv(process.env.GUILD_ID);
+const PORT = process.env.PORT || 3000;
 
 const CONSOLE_CHANNEL_NAME = "🚫-console";
 const VERIFIED_ROLE = "MDC verified";
@@ -215,6 +217,15 @@ client.on('messageCreate', async message => {
       if (channel) channel.send({ embeds: [embed] }).catch(() => {});
     }
   }
+});
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('MDC Bot is running');
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`HTTP server listening on port ${PORT}`);
 });
 
 if (!TOKEN) {
