@@ -14,7 +14,7 @@ const client = new Client({
 
 function cleanEnv(value) {
   if (!value) return '';
-  return String(value).trim().replace(/^['"]|['"]$/g, '');
+  return String(value).trim().replace(/^['\"]|['\"]$/g, '');
 }
 
 const TOKEN = cleanEnv(process.env.TOKEN || process.env.DISCORD_TOKEN);
@@ -23,11 +23,12 @@ const GUILD_ID = cleanEnv(process.env.GUILD_ID);
 const PORT = process.env.PORT || 3000;
 const DM_CLOSE_MS = 15 * 60 * 1000;
 
-const CONSOLE_CHANNEL_NAME = "🚫-console";
+const CONSOLE_CHANNEL_NAME = "\u{1F6AB}-console";
 const VERIFIED_ROLE = "MDC verified";
 const ROBLOX_VERIFIED_ROLE = "Roblox Verified";
 const OWNER_ROLE = "Owner";
 const MOD_ROLE = "Moderator";
+const PROTECTED_ROLES = ["Owner", "Moderator", "MDC BOT", "MDC Bot"];
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 const usedCodes = new Set();
@@ -56,6 +57,12 @@ function isStaff(member) {
   return member.roles.cache.some(r => r.name === OWNER_ROLE || r.name === MOD_ROLE);
 }
 
+function isProtected(member) {
+  if (!member) return false;
+  if (member.id === client.user.id || member.user?.bot) return true;
+  return member.roles.cache.some(r => PROTECTED_ROLES.includes(r.name));
+}
+
 async function lookupRoblox(username) {
   const res = await fetch('https://users.roblox.com/v1/usernames/users', {
     method: 'POST',
@@ -69,49 +76,15 @@ async function lookupRoblox(username) {
 }
 
 const commands = [
-  new SlashCommandBuilder()
-    .setName('verify')
-    .setDescription('Verify your account with a code from the MDC verify site')
-    .addStringOption(option => option.setName('code').setDescription('Verification code from the site').setRequired(true)),
-  new SlashCommandBuilder()
-    .setName('linkroblox')
-    .setDescription('Link a real Roblox account')
-    .addStringOption(option => option.setName('username').setDescription('Your Roblox username').setRequired(true)),
+  new SlashCommandBuilder().setName('verify').setDescription('Verify your account with a code from the MDC verify site').addStringOption(option => option.setName('code').setDescription('Verification code from the site').setRequired(true)),
+  new SlashCommandBuilder().setName('linkroblox').setDescription('Link a real Roblox account').addStringOption(option => option.setName('username').setDescription('Your Roblox username').setRequired(true)),
   new SlashCommandBuilder().setName('unlinkroblox').setDescription('Unlink your Roblox account'),
-  new SlashCommandBuilder()
-    .setName('roblox')
-    .setDescription('Check linked Roblox account of a user')
-    .addUserOption(option => option.setName('user').setDescription('The user to check').setRequired(false)),
-  new SlashCommandBuilder()
-    .setName('ban')
-    .setDescription('Ban a member')
-    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
-    .addUserOption(option => option.setName('user').setDescription('Member to ban').setRequired(true))
-    .addStringOption(option => option.setName('reason').setDescription('Ban reason').setRequired(true)),
-  new SlashCommandBuilder()
-    .setName('kick')
-    .setDescription('Kick a member')
-    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
-    .addUserOption(option => option.setName('user').setDescription('Member to kick').setRequired(true))
-    .addStringOption(option => option.setName('reason').setDescription('Kick reason').setRequired(true)),
-  new SlashCommandBuilder()
-    .setName('mute')
-    .setDescription('Timeout a member')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-    .addUserOption(option => option.setName('user').setDescription('Member to mute').setRequired(true))
-    .addStringOption(option => option.setName('reason').setDescription('Mute reason').setRequired(true))
-    .addIntegerOption(option => option.setName('minutes').setDescription('Timeout minutes (default 60)').setMinValue(1).setMaxValue(40320)),
-  new SlashCommandBuilder()
-    .setName('unmute')
-    .setDescription('Remove a timeout')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-    .addUserOption(option => option.setName('user').setDescription('Member to unmute').setRequired(true)),
-  new SlashCommandBuilder()
-    .setName('unban')
-    .setDescription('Unban a user by ID')
-    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
-    .addStringOption(option => option.setName('userid').setDescription('User ID to unban').setRequired(true))
-    .addStringOption(option => option.setName('reason').setDescription('Unban reason').setRequired(false))
+  new SlashCommandBuilder().setName('roblox').setDescription('Check linked Roblox account of a user').addUserOption(option => option.setName('user').setDescription('The user to check').setRequired(false)),
+  new SlashCommandBuilder().setName('ban').setDescription('Ban a member').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addUserOption(option => option.setName('user').setDescription('Member to ban').setRequired(true)).addStringOption(option => option.setName('reason').setDescription('Ban reason').setRequired(true)),
+  new SlashCommandBuilder().setName('kick').setDescription('Kick a member').setDefaultMemberPermissions(PermissionFlagsBits.KickMembers).addUserOption(option => option.setName('user').setDescription('Member to kick').setRequired(true)).addStringOption(option => option.setName('reason').setDescription('Kick reason').setRequired(true)),
+  new SlashCommandBuilder().setName('mute').setDescription('Timeout a member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(option => option.setName('user').setDescription('Member to mute').setRequired(true)).addStringOption(option => option.setName('reason').setDescription('Mute reason').setRequired(true)).addIntegerOption(option => option.setName('minutes').setDescription('Timeout minutes (default 60)').setMinValue(1).setMaxValue(40320)),
+  new SlashCommandBuilder().setName('unmute').setDescription('Remove a timeout').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(option => option.setName('user').setDescription('Member to unmute').setRequired(true)),
+  new SlashCommandBuilder().setName('unban').setDescription('Unban a user by ID').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addStringOption(option => option.setName('userid').setDescription('User ID to unban').setRequired(true)).addStringOption(option => option.setName('reason').setDescription('Unban reason').setRequired(false))
 ].map(cmd => cmd.toJSON());
 
 client.on('warn', (info) => console.log('[warn]', info));
@@ -136,13 +109,19 @@ client.on('interactionCreate', async interaction => {
     await interaction.message.delete().catch(() => {});
     return;
   }
-
   if (!interaction.isChatInputCommand()) return;
   const { commandName, options, member, guild, user } = interaction;
 
   async function sendLog(embed) {
     const channel = guild.channels.cache.find(c => c.name === CONSOLE_CHANNEL_NAME || c.name.includes('console'));
     if (channel) await channel.send({ embeds: [embed] }).catch(() => {});
+  }
+
+  async function protectedTarget(targetUser) {
+    if (!targetUser) return true;
+    if (targetUser.id === client.user.id || targetUser.bot) return true;
+    const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
+    return isProtected(targetMember);
   }
 
   if (commandName === 'verify') {
@@ -154,15 +133,9 @@ client.on('interactionCreate', async interaction => {
     if (role) await member.roles.add(role).catch(() => {});
     await interaction.reply({ content: 'You have been successfully verified!', ephemeral: true });
     await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('Verification Successful').setDescription(`${user} verified.`).setTimestamp());
-
     try {
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Kapat').setStyle(ButtonStyle.Secondary)
-      );
-      const dm = await user.send({
-        content: 'Discord sunucuma katıldığın için teşekkürler.',
-        components: [row]
-      });
+      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Kapat').setStyle(ButtonStyle.Secondary));
+      const dm = await user.send({ content: 'Discord sunucuma katıldığın için teşekkürler.', components: [row] });
       setTimeout(() => dm.delete().catch(() => {}), DM_CLOSE_MS);
     } catch {
       console.log('Could not DM verified user.');
@@ -172,26 +145,16 @@ client.on('interactionCreate', async interaction => {
 
   if (commandName === 'linkroblox') {
     const username = options.getString('username').trim();
-    if (robloxLinks.has(user.id)) {
-      return interaction.reply({ content: 'You already have a Roblox account linked. Use `/unlinkroblox` first.', ephemeral: true });
-    }
+    if (robloxLinks.has(user.id)) return interaction.reply({ content: 'You already have a Roblox account linked. Use `/unlinkroblox` first.', ephemeral: true });
     await interaction.deferReply({ ephemeral: true });
     let roblox;
-    try {
-      roblox = await lookupRoblox(username);
-    } catch {
-      return interaction.editReply('Could not reach Roblox. Try again.');
-    }
+    try { roblox = await lookupRoblox(username); } catch { return interaction.editReply('Could not reach Roblox. Try again.'); }
     if (!roblox) return interaction.editReply('That Roblox username does not exist.');
     robloxLinks.set(user.id, roblox.name);
     const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
     if (role) await member.roles.add(role).catch(() => {});
     let nickNote = '';
-    try {
-      await member.setNickname(roblox.name);
-    } catch {
-      nickNote = ' Nickname was not changed. Move the bot role above this member.';
-    }
+    try { await member.setNickname(roblox.name); } catch { nickNote = ' Nickname was not changed. Move the bot role above this member.'; }
     await interaction.editReply(`Linked Roblox account **${roblox.name}**.${nickNote}`);
     await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(`${user} linked **${roblox.name}** (ID ${roblox.id})`).setTimestamp());
     return;
@@ -214,7 +177,16 @@ client.on('interactionCreate', async interaction => {
     return interaction.reply({ content: `**${target.username}** is linked to Roblox: **${linked}**`, ephemeral: true });
   }
 
-  if (['ban', 'kick', 'mute', 'unmute', 'unban'].includes(commandName) && !isStaff(member)) {
+  if (['ban', 'kick', 'mute', 'unmute'].includes(commandName)) {
+    if (!isStaff(member)) return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
+    const target = options.getUser('user');
+    if (await protectedTarget(target)) {
+      await sendLog(new EmbedBuilder().setColor(0xED4245).setTitle('Blocked moderation').setDescription(`${user} tried to ${commandName} a protected member.`).setTimestamp());
+      return interaction.reply({ content: 'This member is protected. Action refused.', ephemeral: true });
+    }
+  }
+
+  if (commandName === 'unban' && !isStaff(member)) {
     return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
   }
 
@@ -269,6 +241,7 @@ client.on('interactionCreate', async interaction => {
     const userId = options.getString('userid').trim();
     const reason = options.getString('reason') || 'No reason';
     if (!/^\d{17,20}$/.test(userId)) return interaction.reply({ content: 'Enter a valid user ID.', ephemeral: true });
+    if (userId === client.user.id) return interaction.reply({ content: 'This member is protected. Action refused.', ephemeral: true });
     await guild.members.unban(userId, `${user.tag}: ${reason}`);
     await interaction.reply({ content: `Unbanned <@${userId}>.`, ephemeral: true });
     await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('User Unbanned').setDescription(`${user} unbanned ${userId}\nReason: ${reason}`).setTimestamp());
@@ -276,7 +249,7 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('messageCreate', async message => {
-  if (message.author.bot || !message.guild || !message.member || isStaff(message.member)) return;
+  if (message.author.bot || !message.guild || !message.member || isProtected(message.member)) return;
   const content = message.content.toLowerCase();
   if (!['http://', 'https://', 'discord.gg', 'discord.com/invite'].some(w => content.includes(w))) return;
   const count = warnings.get(message.author.id) || 0;
