@@ -1,5 +1,5 @@
 const http = require('http');
-const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const client = new Client({
   intents: [
@@ -21,6 +21,7 @@ const TOKEN = cleanEnv(process.env.TOKEN || process.env.DISCORD_TOKEN);
 const CLIENT_ID = cleanEnv(process.env.CLIENT_ID);
 const GUILD_ID = cleanEnv(process.env.GUILD_ID);
 const PORT = process.env.PORT || 3000;
+const DM_CLOSE_MS = 15 * 60 * 1000;
 
 const CONSOLE_CHANNEL_NAME = "🚫-console";
 const VERIFIED_ROLE = "MDC verified";
@@ -131,6 +132,11 @@ client.once('clientReady', async () => {
 });
 
 client.on('interactionCreate', async interaction => {
+  if (interaction.isButton() && interaction.customId === 'close_verify_dm') {
+    await interaction.message.delete().catch(() => {});
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
   const { commandName, options, member, guild, user } = interaction;
 
@@ -148,6 +154,19 @@ client.on('interactionCreate', async interaction => {
     if (role) await member.roles.add(role).catch(() => {});
     await interaction.reply({ content: 'You have been successfully verified!', ephemeral: true });
     await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('Verification Successful').setDescription(`${user} verified.`).setTimestamp());
+
+    try {
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Kapat').setStyle(ButtonStyle.Secondary)
+      );
+      const dm = await user.send({
+        content: 'Discord sunucuma katıldığın için teşekkürler.',
+        components: [row]
+      });
+      setTimeout(() => dm.delete().catch(() => {}), DM_CLOSE_MS);
+    } catch {
+      console.log('Could not DM verified user.');
+    }
     return;
   }
 
@@ -164,18 +183,15 @@ client.on('interactionCreate', async interaction => {
       return interaction.editReply('Could not reach Roblox. Try again.');
     }
     if (!roblox) return interaction.editReply('That Roblox username does not exist.');
-
     robloxLinks.set(user.id, roblox.name);
     const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
     if (role) await member.roles.add(role).catch(() => {});
-
     let nickNote = '';
     try {
       await member.setNickname(roblox.name);
     } catch {
       nickNote = ' Nickname was not changed. Move the bot role above this member.';
     }
-
     await interaction.editReply(`Linked Roblox account **${roblox.name}**.${nickNote}`);
     await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(`${user} linked **${roblox.name}** (ID ${roblox.id})`).setTimestamp());
     return;
