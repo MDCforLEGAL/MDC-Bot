@@ -135,7 +135,7 @@ client.on('interactionCreate', async interaction => {
     await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('Verification Successful').setDescription(`${user} verified.`).setTimestamp());
     try {
       const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Kapat').setStyle(ButtonStyle.Secondary));
-      const dm = await user.send({ content: 'Discord sunucuma katıldığın için teşekkürler.', components: [row] });
+      const dm = await user.send({ content: 'Discord sunucuma kat\u0131ld\u0131\u011f\u0131n i\u00e7in te\u015fekk\u00fcrler.', components: [row] });
       setTimeout(() => dm.delete().catch(() => {}), DM_CLOSE_MS);
     } catch {
       console.log('Could not DM verified user.');
@@ -154,7 +154,11 @@ client.on('interactionCreate', async interaction => {
     const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
     if (role) await member.roles.add(role).catch(() => {});
     let nickNote = '';
-    try { await member.setNickname(roblox.name); } catch { nickNote = ' Nickname was not changed. Move the bot role above this member.'; }
+    if (isStaff(member)) {
+      nickNote = ' Staff nickname was left unchanged.';
+    } else {
+      try { await member.setNickname(roblox.name); } catch { nickNote = ' Nickname was not changed. Move the bot role above this member.'; }
+    }
     await interaction.editReply(`Linked Roblox account **${roblox.name}**.${nickNote}`);
     await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(`${user} linked **${roblox.name}** (ID ${roblox.id})`).setTimestamp());
     return;
@@ -166,7 +170,7 @@ client.on('interactionCreate', async interaction => {
     robloxLinks.delete(user.id);
     const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
     if (role) await member.roles.remove(role).catch(() => {});
-    await member.setNickname(null).catch(() => {});
+    if (!isStaff(member)) await member.setNickname(null).catch(() => {});
     return interaction.reply({ content: `Unlinked Roblox account: **${oldName}**`, ephemeral: true });
   }
 
