@@ -48,61 +48,51 @@ function checksum(body) {
 function isValidCode(raw) {
   const code = String(raw || '').trim().toUpperCase();
   if (!/^MDC-[A-Z2-9]{8}$/.test(code)) return false;
-  const body = code.slice(4, 10);
-  const given = code.slice(10);
-  return checksum(body) === given;
+  return checksum(code.slice(4, 10)) === code.slice(10);
 }
 
 function isStaff(member) {
   return member.roles.cache.some(r => r.name === OWNER_ROLE || r.name === MOD_ROLE);
 }
 
+async function lookupRoblox(username) {
+  const res = await fetch('https://users.roblox.com/v1/usernames/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ usernames: [username], excludeBannedUsers: true })
+  });
+  if (!res.ok) throw new Error('Roblox API failed');
+  const data = await res.json();
+  if (!data.data || !data.data.length) return null;
+  return data.data[0];
+}
+
 const commands = [
   new SlashCommandBuilder()
     .setName('verify')
     .setDescription('Verify your account with a code from the MDC verify site')
-    .addStringOption(option =>
-      option.setName('code')
-        .setDescription('Verification code from the site')
-        .setRequired(true)
-    ),
-
+    .addStringOption(option => option.setName('code').setDescription('Verification code from the site').setRequired(true)),
   new SlashCommandBuilder()
     .setName('linkroblox')
-    .setDescription('Link your Roblox account')
-    .addStringOption(option =>
-      option.setName('username')
-        .setDescription('Your Roblox username')
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName('unlinkroblox')
-    .setDescription('Unlink your Roblox account'),
-
+    .setDescription('Link a real Roblox account')
+    .addStringOption(option => option.setName('username').setDescription('Your Roblox username').setRequired(true)),
+  new SlashCommandBuilder().setName('unlinkroblox').setDescription('Unlink your Roblox account'),
   new SlashCommandBuilder()
     .setName('roblox')
     .setDescription('Check linked Roblox account of a user')
-    .addUserOption(option =>
-      option.setName('user')
-        .setDescription('The user to check')
-        .setRequired(false)
-    ),
-
+    .addUserOption(option => option.setName('user').setDescription('The user to check').setRequired(false)),
   new SlashCommandBuilder()
     .setName('ban')
     .setDescription('Ban a member')
     .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
     .addUserOption(option => option.setName('user').setDescription('Member to ban').setRequired(true))
     .addStringOption(option => option.setName('reason').setDescription('Ban reason').setRequired(true)),
-
   new SlashCommandBuilder()
     .setName('kick')
     .setDescription('Kick a member')
     .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
     .addUserOption(option => option.setName('user').setDescription('Member to kick').setRequired(true))
     .addStringOption(option => option.setName('reason').setDescription('Kick reason').setRequired(true)),
-
   new SlashCommandBuilder()
     .setName('mute')
     .setDescription('Timeout a member')
@@ -110,13 +100,11 @@ const commands = [
     .addUserOption(option => option.setName('user').setDescription('Member to mute').setRequired(true))
     .addStringOption(option => option.setName('reason').setDescription('Mute reason').setRequired(true))
     .addIntegerOption(option => option.setName('minutes').setDescription('Timeout minutes (default 60)').setMinValue(1).setMaxValue(40320)),
-
   new SlashCommandBuilder()
     .setName('unmute')
     .setDescription('Remove a timeout')
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .addUserOption(option => option.setName('user').setDescription('Member to unmute').setRequired(true)),
-
   new SlashCommandBuilder()
     .setName('unban')
     .setDescription('Unban a user by ID')
@@ -131,17 +119,11 @@ client.on('shardError', (err) => console.error('[shard error]', err));
 
 client.once('clientReady', async () => {
   console.log(`Logged in as ${client.user.tag}`);
-  if (!CLIENT_ID) {
-    console.log('CLIENT_ID is missing. Slash commands will not register.');
-    return;
-  }
+  if (!CLIENT_ID) return console.log('CLIENT_ID is missing.');
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try {
-    if (GUILD_ID) {
-      await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
-    } else {
-      await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-    }
+    if (GUILD_ID) await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
+    else await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
     console.log('Successfully reloaded application (/) commands.');
   } catch (error) {
     console.error('Command register error:', error);
@@ -150,7 +132,6 @@ client.once('clientReady', async () => {
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
-
   const { commandName, options, member, guild, user } = interaction;
 
   async function sendLog(embed) {
@@ -160,12 +141,8 @@ client.on('interactionCreate', async interaction => {
 
   if (commandName === 'verify') {
     const code = options.getString('code').trim().toUpperCase();
-    if (!isValidCode(code)) {
-      return interaction.reply({ content: 'Invalid code. Get a code from the verify site.', ephemeral: true });
-    }
-    if (usedCodes.has(code)) {
-      return interaction.reply({ content: 'This code has already been used.', ephemeral: true });
-    }
+    if (!isValidCode(code)) return interaction.reply({ content: 'Invalid code. Get a code from the verify site.', ephemeral: true });
+    if (usedCodes.has(code)) return interaction.reply({ content: 'This code has already been used.', ephemeral: true });
     usedCodes.add(code);
     const role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE);
     if (role) await member.roles.add(role).catch(() => {});
@@ -179,25 +156,38 @@ client.on('interactionCreate', async interaction => {
     if (robloxLinks.has(user.id)) {
       return interaction.reply({ content: 'You already have a Roblox account linked. Use `/unlinkroblox` first.', ephemeral: true });
     }
-    if (username.length < 3 || username.length > 20) {
-      return interaction.reply({ content: 'Invalid Roblox username.', ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+    let roblox;
+    try {
+      roblox = await lookupRoblox(username);
+    } catch {
+      return interaction.editReply('Could not reach Roblox. Try again.');
     }
-    robloxLinks.set(user.id, username);
+    if (!roblox) return interaction.editReply('That Roblox username does not exist.');
+
+    robloxLinks.set(user.id, roblox.name);
     const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
     if (role) await member.roles.add(role).catch(() => {});
-    await interaction.reply({ content: `Successfully linked Roblox account: **${username}**`, ephemeral: true });
-    await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(`${user} linked **${username}**`).setTimestamp());
+
+    let nickNote = '';
+    try {
+      await member.setNickname(roblox.name);
+    } catch {
+      nickNote = ' Nickname was not changed. Move the bot role above this member.';
+    }
+
+    await interaction.editReply(`Linked Roblox account **${roblox.name}**.${nickNote}`);
+    await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(`${user} linked **${roblox.name}** (ID ${roblox.id})`).setTimestamp());
     return;
   }
 
   if (commandName === 'unlinkroblox') {
-    if (!robloxLinks.has(user.id)) {
-      return interaction.reply({ content: 'You do not have a Roblox account linked.', ephemeral: true });
-    }
+    if (!robloxLinks.has(user.id)) return interaction.reply({ content: 'You do not have a Roblox account linked.', ephemeral: true });
     const oldName = robloxLinks.get(user.id);
     robloxLinks.delete(user.id);
     const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
     if (role) await member.roles.remove(role).catch(() => {});
+    await member.setNickname(null).catch(() => {});
     return interaction.reply({ content: `Unlinked Roblox account: **${oldName}**`, ephemeral: true });
   }
 
@@ -208,10 +198,8 @@ client.on('interactionCreate', async interaction => {
     return interaction.reply({ content: `**${target.username}** is linked to Roblox: **${linked}**`, ephemeral: true });
   }
 
-  if (['ban', 'kick', 'mute', 'unmute', 'unban'].includes(commandName)) {
-    if (!isStaff(member)) {
-      return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
-    }
+  if (['ban', 'kick', 'mute', 'unmute', 'unban'].includes(commandName) && !isStaff(member)) {
+    return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
   }
 
   if (commandName === 'ban') {
@@ -264,9 +252,7 @@ client.on('interactionCreate', async interaction => {
   if (commandName === 'unban') {
     const userId = options.getString('userid').trim();
     const reason = options.getString('reason') || 'No reason';
-    if (!/^\d{17,20}$/.test(userId)) {
-      return interaction.reply({ content: 'Enter a valid user ID.', ephemeral: true });
-    }
+    if (!/^\d{17,20}$/.test(userId)) return interaction.reply({ content: 'Enter a valid user ID.', ephemeral: true });
     await guild.members.unban(userId, `${user.tag}: ${reason}`);
     await interaction.reply({ content: `Unbanned <@${userId}>.`, ephemeral: true });
     await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('User Unbanned').setDescription(`${user} unbanned ${userId}\nReason: ${reason}`).setTimestamp());
@@ -274,11 +260,9 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('messageCreate', async message => {
-  if (message.author.bot || !message.guild || !message.member) return;
-  if (isStaff(message.member)) return;
+  if (message.author.bot || !message.guild || !message.member || isStaff(message.member)) return;
   const content = message.content.toLowerCase();
-  const isSpam = ['http://', 'https://', 'discord.gg', 'discord.com/invite'].some(w => content.includes(w));
-  if (!isSpam) return;
+  if (!['http://', 'https://', 'discord.gg', 'discord.com/invite'].some(w => content.includes(w))) return;
   const count = warnings.get(message.author.id) || 0;
   if (count === 0) {
     warnings.set(message.author.id, 1);
@@ -290,16 +274,13 @@ client.on('messageCreate', async message => {
   }
 });
 
-const server = http.createServer((req, res) => {
+http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end(client.isReady() ? `MDC Bot online as ${client.user.tag}` : 'MDC Bot starting');
-});
-server.listen(PORT, '0.0.0.0', () => console.log(`HTTP server listening on port ${PORT}`));
+}).listen(PORT, '0.0.0.0');
 
 if (!TOKEN) {
   console.error('TOKEN is missing.');
   process.exit(1);
 }
-
-console.log(`Token loaded. Length: ${TOKEN.length}`);
 client.login(TOKEN).catch((err) => console.error('LOGIN FAILED:', err && err.message ? err.message : err));
