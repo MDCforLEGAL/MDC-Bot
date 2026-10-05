@@ -26,6 +26,8 @@ const DM_CLOSE_MS = 15 * 60 * 1000;
 const AI_API_KEY = cleanEnv(process.env.AI_API_KEY);
 const AI_BASE_URL = (cleanEnv(process.env.AI_BASE_URL) || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
 const AI_MODEL = cleanEnv(process.env.AI_MODEL) || 'openrouter/auto';
+const startedAt = Date.now();
+const sentStatusDays = new Set();
 
 const CONSOLE_CHANNEL_NAME = '🚫-console';
 const VERIFIED_ROLE = 'MDC verified';
@@ -67,6 +69,48 @@ function isProtected(member) {
   if (!member) return false;
   if (member.id === client.user.id || member.user?.bot) return true;
   return member.roles.cache.some(r => PROTECTED_ROLES.includes(r.name));
+}
+
+function formatUptime(ms) {
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return d + 'd ' + h + 'h ' + m + 'm';
+}
+
+function statusEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle('MDC Bot Status')
+    .addFields(
+      { name: 'Status', value: client.isReady() ? 'Online' : 'Starting', inline: true },
+      { name: 'Ping', value: Math.round(client.ws.ping) + ' ms', inline: true },
+      { name: 'Uptime', value: formatUptime(Date.now() - startedAt), inline: true },
+      { name: 'Servers', value: String(client.guilds.cache.size), inline: true },
+      { name: 'AI chat', value: AI_API_KEY ? 'Enabled' : 'Disabled', inline: true },
+      { name: 'Commands', value: '/verify, /linkroblox, /unlinkroblox, /roblox, /status, /ban, /kick, /mute, /unmute, /unban', inline: false }
+    )
+    .setTimestamp();
+}
+
+async function sendStatusToConsole() {
+  for (const guild of client.guilds.cache.values()) {
+    const channel = guild.channels.cache.find(c => c.name === CONSOLE_CHANNEL_NAME || c.name.includes('console'));
+    if (channel) await channel.send({ embeds: [statusEmbed()] }).catch(() => {});
+  }
+}
+
+function turkeyParts() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Istanbul',
+    weekday: 'short',
+    hour: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(new Date());
+  return Object.fromEntries(parts.map(p => [p.type, p.value]));
 }
 
 async function isVerifiedUser(userId) {
@@ -133,6 +177,7 @@ async function lookupRoblox(input) {
 }
 
 const commands = [
+  new SlashCommandBuilder().setName('status').setDescription('Show the bot status'),
   new SlashCommandBuilder().setName('verify').setDescription('Verify your account with a code from the MDC verify site').addStringOption(option => option.setName('code').setDescription('Verification code from the site').setRequired(true)),
   new SlashCommandBuilder().setName('linkroblox').setDescription('Link a real Roblox account').addStringOption(option => option.setName('username').setDescription('Your Roblox display name').setRequired(true)),
   new SlashCommandBuilder().setName('unlinkroblox').setDescription('Unlink your Roblox account'),
@@ -151,6 +196,15 @@ client.on('shardError', (err) => console.error('[shard error]', err));
 client.once('clientReady', async () => {
   console.log('Logged in as ' + client.user.tag);
   console.log(AI_API_KEY ? 'AI chat enabled.' : 'AI chat disabled. AI_API_KEY is missing.');
+  setInterval(async () => {
+    const p = turkeyParts();
+    if (p.weekday !== 'Mon' && p.weekday !== 'Fri') return;
+    if (p.hour !== '12') return;
+    const key = p.month + '-' + p.day;
+    if (sentStatusDays.has(key)) return;
+    sentStatusDays.add(key);
+    await sendStatusToConsole();
+  }, 60 * 1000);
   if (!CLIENT_ID) return console.log('CLIENT_ID is missing.');
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try {
@@ -169,6 +223,10 @@ client.on('interactionCreate', async interaction => {
   }
   if (!interaction.isChatInputCommand()) return;
   const { commandName, options, member, guild, user } = interaction;
+
+  if (commandName === 'status') {
+    return interaction.reply({ embeds: [statusEmbed()] });
+  }
 
   async function sendLog(embed) {
     const channel = guild.channels.cache.find(c => c.name === CONSOLE_CHANNEL_NAME || c.name.includes('console'));
