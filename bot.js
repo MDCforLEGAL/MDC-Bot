@@ -24,8 +24,8 @@ const GUILD_ID = cleanEnv(process.env.GUILD_ID);
 const PORT = process.env.PORT || 3000;
 const DM_CLOSE_MS = 15 * 60 * 1000;
 const AI_API_KEY = cleanEnv(process.env.AI_API_KEY);
-const AI_BASE_URL = (cleanEnv(process.env.AI_BASE_URL) || 'https://api.openai.com/v1').replace(/\/$/, '');
-const AI_MODEL = cleanEnv(process.env.AI_MODEL) || 'gpt-4o-mini';
+const AI_BASE_URL = (cleanEnv(process.env.AI_BASE_URL) || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+const AI_MODEL = cleanEnv(process.env.AI_MODEL) || 'openrouter/auto';
 
 const CONSOLE_CHANNEL_NAME = '🚫-console';
 const VERIFIED_ROLE = 'MDC verified';
@@ -89,7 +89,12 @@ async function askAi(userId, text) {
   const trimmed = history.slice(-8);
   const res = await fetch(AI_BASE_URL + '/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + AI_API_KEY },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + AI_API_KEY,
+      'HTTP-Referer': 'https://mdcforlegal.github.io/MDC-VERIFY/',
+      'X-Title': 'MDC Bot'
+    },
     body: JSON.stringify({
       model: AI_MODEL,
       max_tokens: 300,
@@ -310,7 +315,6 @@ client.on('interactionCreate', async interaction => {
 
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
-
   if (!message.guild) {
     if (!(await isVerifiedUser(message.author.id))) {
       return message.reply('Verify in the server before chatting with me.').catch(() => {});
@@ -324,7 +328,6 @@ client.on('messageCreate', async message => {
     }
     return;
   }
-
   if (!message.member || isProtected(message.member)) return;
   const content = message.content.toLowerCase();
   if (!['http://', 'https://', 'discord.gg', 'discord.com/invite'].some(w => content.includes(w))) return;
