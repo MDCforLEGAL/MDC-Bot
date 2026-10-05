@@ -32,6 +32,7 @@ const PROTECTED_ROLES = ['Owner', 'Moderator', 'MDC BOT', 'MDC Bot'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 const usedCodes = new Set();
+const verifiedUsers = new Set();
 const warnings = new Map();
 const robloxLinks = new Map();
 
@@ -74,7 +75,6 @@ async function lookupRoblox(input) {
     const data = await byUsername.json();
     if (data.data && data.data.length) return data.data[0];
   }
-
   const search = await fetch('https://users.roblox.com/v1/users/search?keyword=' + encodeURIComponent(query) + '&limit=10');
   if (!search.ok) throw new Error('Roblox API failed');
   const found = await search.json();
@@ -133,17 +133,24 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (commandName === 'verify') {
+    const role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE);
+    if (verifiedUsers.has(user.id) || (role && member.roles.cache.has(role.id))) {
+      return interaction.reply({ content: 'You are already verified.', ephemeral: true });
+    }
     const code = options.getString('code').trim().toUpperCase();
     if (!isValidCode(code)) return interaction.reply({ content: 'Invalid code. Get a code from the verify site.', ephemeral: true });
     if (usedCodes.has(code)) return interaction.reply({ content: 'This code has already been used.', ephemeral: true });
     usedCodes.add(code);
-    const role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE);
+    verifiedUsers.add(user.id);
     if (role) await member.roles.add(role).catch(() => {});
     await interaction.reply({ content: 'You have been successfully verified!', ephemeral: true });
     await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('Verification Successful').setDescription(user + ' verified.').setTimestamp());
     try {
-      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Kapat').setStyle(ButtonStyle.Secondary));
-      const dm = await user.send({ content: 'Discord sunucuma katıldığın için teşekkürler.', components: [row] });
+      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Close').setStyle(ButtonStyle.Secondary));
+      const dm = await user.send({
+        content: 'Thanks for joining the MDC Discord server.\n\nYour account is now verified. Read the rules, then jump into the channels.\n\nPress Close to remove this message. If you leave it, it will be deleted in 15 minutes.',
+        components: [row]
+      });
       setTimeout(() => dm.delete().catch(() => {}), DM_CLOSE_MS);
     } catch {
       console.log('Could not DM verified user.');
@@ -163,11 +170,8 @@ client.on('interactionCreate', async interaction => {
     const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
     if (role) await member.roles.add(role).catch(() => {});
     let nickNote = '';
-    if (isStaff(member)) {
-      nickNote = ' Staff nickname was left unchanged.';
-    } else {
-      try { await member.setNickname(shown.slice(0, 32)); } catch { nickNote = ' Nickname was not changed. Move the bot role above this member.'; }
-    }
+    if (isStaff(member)) nickNote = ' Staff nickname was left unchanged.';
+    else { try { await member.setNickname(shown.slice(0, 32)); } catch { nickNote = ' Nickname was not changed. Move the bot role above this member.'; } }
     await interaction.editReply('Linked Roblox account **' + shown + '**.' + nickNote);
     await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(user + ' linked **' + shown + '** (@' + roblox.name + ', ID ' + roblox.id + ')').setTimestamp());
     return;
@@ -199,9 +203,7 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
-  if (commandName === 'unban' && !isStaff(member)) {
-    return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
-  }
+  if (commandName === 'unban' && !isStaff(member)) return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
 
   if (commandName === 'ban') {
     const target = options.getUser('user');
