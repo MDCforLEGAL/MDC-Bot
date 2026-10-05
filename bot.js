@@ -7,7 +7,8 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildModeration
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.DirectMessages
   ],
   partials: [Partials.Message, Partials.Channel, Partials.GuildMember]
 });
@@ -22,6 +23,9 @@ const CLIENT_ID = cleanEnv(process.env.CLIENT_ID);
 const GUILD_ID = cleanEnv(process.env.GUILD_ID);
 const PORT = process.env.PORT || 3000;
 const DM_CLOSE_MS = 15 * 60 * 1000;
+const AI_API_KEY = cleanEnv(process.env.AI_API_KEY);
+const AI_BASE_URL = (cleanEnv(process.env.AI_BASE_URL) || 'https://api.openai.com/v1').replace(/\/$/, '');
+const AI_MODEL = cleanEnv(process.env.AI_MODEL) || 'gpt-4o-mini';
 
 const CONSOLE_CHANNEL_NAME = '🚫-console';
 const VERIFIED_ROLE = 'MDC verified';
@@ -35,6 +39,7 @@ const usedCodes = new Set();
 const verifiedUsers = new Set();
 const warnings = new Map();
 const robloxLinks = new Map();
+const aiHistory = new Map();
 
 function checksum(body) {
   let a = 0;
@@ -62,6 +67,45 @@ function isProtected(member) {
   if (!member) return false;
   if (member.id === client.user.id || member.user?.bot) return true;
   return member.roles.cache.some(r => PROTECTED_ROLES.includes(r.name));
+}
+
+async function isVerifiedUser(userId) {
+  if (verifiedUsers.has(userId)) return true;
+  for (const guild of client.guilds.cache.values()) {
+    const member = await guild.members.fetch(userId).catch(() => null);
+    const role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE);
+    if (member && role && member.roles.cache.has(role.id)) {
+      verifiedUsers.add(userId);
+      return true;
+    }
+  }
+  return false;
+}
+
+async function askAi(userId, text) {
+  if (!AI_API_KEY) return 'AI chat is not set up yet.';
+  const history = aiHistory.get(userId) || [];
+  history.push({ role: 'user', content: String(text || '').slice(0, 500) });
+  const trimmed = history.slice(-8);
+  const res = await fetch(AI_BASE_URL + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + AI_API_KEY },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      max_tokens: 300,
+      messages: [
+        { role: 'system', content: 'You are MDC Bot, a friendly Discord assistant. Reply in English, keep it short, and stay appropriate for all ages. Do not discuss sexual content, violence, or illegal activity.' },
+        ...trimmed
+      ]
+    })
+  });
+  if (!res.ok) return 'I could not answer right now. Try again in a moment.';
+  const data = await res.json();
+  const reply = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || 'I do not have an answer.';
+  const safe = reply.slice(0, 1800);
+  trimmed.push({ role: 'assistant', content: safe });
+  aiHistory.set(userId, trimmed.slice(-8));
+  return safe;
 }
 
 async function lookupRoblox(input) {
@@ -101,6 +145,7 @@ client.on('shardError', (err) => console.error('[shard error]', err));
 
 client.once('clientReady', async () => {
   console.log('Logged in as ' + client.user.tag);
+  console.log(AI_API_KEY ? 'AI chat enabled.' : 'AI chat disabled. AI_API_KEY is missing.');
   if (!CLIENT_ID) return console.log('CLIENT_ID is missing.');
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try {
@@ -148,7 +193,7 @@ client.on('interactionCreate', async interaction => {
     try {
       const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Close').setStyle(ButtonStyle.Secondary));
       const dm = await user.send({
-        content: 'Thanks for joining the MDC Discord server.\n\nYour account is now verified. Read the rules, then jump into the channels.\n\nPress Close to remove this message. If you leave it, it will be deleted in 15 minutes.',
+        content: 'Thanks for joining the MDC Discord server.\n\nYour account is now verified. Read the rules, then jump into the channels.\n\nYou can also message me in this DM and I will reply.\n\nPress Close to remove this message. If you leave it, it will be deleted in 15 minutes.',
         components: [row]
       });
       setTimeout(() => dm.delete().catch(() => {}), DM_CLOSE_MS);
@@ -264,7 +309,23 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('messageCreate', async message => {
-  if (message.author.bot || !message.guild || !message.member || isProtected(message.member)) return;
+  if (message.author.bot) return;
+
+  if (!message.guild) {
+    if (!(await isVerifiedUser(message.author.id))) {
+      return message.reply('Verify in the server before chatting with me.').catch(() => {});
+    }
+    try {
+      await message.channel.sendTyping();
+      const reply = await askAi(message.author.id, message.content || '');
+      await message.reply(reply);
+    } catch {
+      await message.reply('I could not answer right now.').catch(() => {});
+    }
+    return;
+  }
+
+  if (!message.member || isProtected(message.member)) return;
   const content = message.content.toLowerCase();
   if (!['http://', 'https://', 'discord.gg', 'discord.com/invite'].some(w => content.includes(w))) return;
   const count = warnings.get(message.author.id) || 0;
