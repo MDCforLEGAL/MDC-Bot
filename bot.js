@@ -99,7 +99,7 @@ async function askAi(userId, text) {
       model: AI_MODEL,
       max_tokens: 300,
       messages: [
-        { role: 'system', content: 'You are MDC Bot, a friendly Discord assistant. Reply in English, keep it short, and stay appropriate for all ages. Do not discuss sexual content, violence, or illegal activity.' },
+        { role: 'system', content: 'You are MDC Bot, a friendly Discord assistant. Always reply in the same language the user used. If they write in Turkish, reply in natural Turkish. Keep it short and appropriate for all ages. Do not discuss sexual content, violence, or illegal activity.' },
         ...trimmed
       ]
     })
