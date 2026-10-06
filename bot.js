@@ -1,5 +1,6 @@
 const http = require('http');
-const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const fs = require('fs');
+const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder } = require('discord.js');
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildModeration, GatewayIntentBits.DirectMessages], partials: [Partials.Message, Partials.Channel, Partials.GuildMember] });
 function cleanEnv(value) { if (!value) return ''; return String(value).trim().replace(/^[\'"]|[\'"]$/g, ''); }
 const TOKEN = cleanEnv(process.env.TOKEN || process.env.DISCORD_TOKEN);
@@ -26,7 +27,12 @@ const PROTECTED_ROLES = ['Owner', 'Moderator', 'MDC BOT', 'MDC Bot'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const STAFF_TESTS = ['testlogs', 'testverify', 'teststatus', 'testai', 'testroblox'];
 const CHANNEL_AI_NOTE = '-# Mentioning the bot can look like spam in some channels. Use DMs for longer chats.';
-const usedCodes = new Set(); const verifiedUsers = new Set(); const warnings = new Map(); const robloxLinks = new Map(); const aiHistory = new Map(); const voiceRooms = new Map();
+const usedCodes = new Set(); const verifiedUsers = new Set(); const warnings = new Map(); const robloxLinks = new Map(); const aiHistory = new Map(); const voiceRooms = new Map(); const userLang = new Map();
+const LANGS = [{id:'en',name:'English'},{id:'tr',name:'Türkçe'},{id:'de',name:'Deutsch'},{id:'es',name:'Español'},{id:'fr',name:'Français'},{id:'ru',name:'Русский'},{id:'ar',name:'العربية'},{id:'pt',name:'Português'}];
+const LANG_FILE = './language-prefs.json';
+function loadLang() { try { for (const [id, lang] of Object.entries(JSON.parse(fs.readFileSync(LANG_FILE, 'utf8')))) userLang.set(id, lang); } catch {} }
+function saveLang() { try { fs.writeFileSync(LANG_FILE, JSON.stringify(Object.fromEntries(userLang))); } catch {} }
+function langName(id) { return (LANGS.find(l => l.id === id) || {}).name || id; }
 const VOICE_EMPTY_CLOSE = 15 * 60 * 1000;
 const VOICE_EMPTY_WARN = 10 * 60 * 1000;
 function checksum(body) { let a = 0, b = 0; for (let i = 0; i < body.length; i++) { const n = CODE_CHARS.indexOf(body[i]); if (n < 0) return null; a = (a + (n + 3) * (i + 7)) % CODE_CHARS.length; b = (b + a + n * 5) % CODE_CHARS.length; } return CODE_CHARS[a] + CODE_CHARS[b]; }
@@ -40,7 +46,7 @@ async function sendToConsole(payload) { for (const guild of client.guilds.cache.
 async function sendStatusToConsole() { await sendToConsole({ embeds: [statusEmbed()] }); }
 function turkeyParts() { const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Istanbul', weekday: 'short', hour: '2-digit', day: '2-digit', month: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()); return Object.fromEntries(parts.map(p => [p.type, p.value])); }
 async function isVerifiedUser(userId) { if (verifiedUsers.has(userId)) return true; for (const guild of client.guilds.cache.values()) { const member = await guild.members.fetch(userId).catch(() => null); const role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE); if (member && role && member.roles.cache.has(role.id)) { verifiedUsers.add(userId); return true; } } return false; }
-async function askAi(userId, text) { if (!AI_API_KEY) return 'AI chat is not set up yet.'; const history = aiHistory.get(userId) || []; history.push({ role: 'user', content: String(text || '').slice(0, 500) }); const trimmed = history.slice(-8); const res = await fetch(AI_BASE_URL + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + AI_API_KEY, 'HTTP-Referer': 'https://mdcforlegal.github.io/MDC-VERIFY/', 'X-Title': 'MDC Bot' }, body: JSON.stringify({ model: AI_MODEL, max_tokens: 300, messages: [{ role: 'system', content: 'You are MDC Bot, a friendly Discord assistant. Always reply in the same language the user used. If they write in Turkish, reply in natural Turkish. Keep it short and appropriate for all ages. Do not discuss sexual content, violence, or illegal activity.' }, ...trimmed] }) }); if (!res.ok) return 'I could not answer right now. Try again in a moment.'; const data = await res.json(); const safe = ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || 'I do not have an answer.').slice(0, 1700); trimmed.push({ role: 'assistant', content: safe }); aiHistory.set(userId, trimmed.slice(-8)); return safe; }
+async function askAi(userId, text) { if (!AI_API_KEY) return 'AI chat is not set up yet.'; const history = aiHistory.get(userId) || []; history.push({ role: 'user', content: String(text || '').slice(0, 500) }); const trimmed = history.slice(-8); const chosen = langName(userLang.get(userId)); const res = await fetch(AI_BASE_URL + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + AI_API_KEY, 'HTTP-Referer': 'https://mdcforlegal.github.io/MDC-VERIFY/', 'X-Title': 'MDC Bot' }, body: JSON.stringify({ model: AI_MODEL, max_tokens: 300, messages: [{ role: 'system', content: 'You are MDC Bot, a friendly Discord assistant. Reply in ' + (chosen || 'the same language the user used') + '. Keep it short and appropriate for all ages. Do not discuss sexual content, violence, or illegal activity.' }, ...trimmed] }) }); if (!res.ok) return 'I could not answer right now. Try again in a moment.'; const data = await res.json(); const safe = ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || 'I do not have an answer.').slice(0, 1700); trimmed.push({ role: 'assistant', content: safe }); aiHistory.set(userId, trimmed.slice(-8)); return safe; }
 async function lookupRoblox(input) { const query = input.trim(); const byUsername = await fetch('https://users.roblox.com/v1/usernames/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: [query], excludeBannedUsers: true }) }); if (byUsername.ok) { const data = await byUsername.json(); if (data.data && data.data.length) return data.data[0]; } const search = await fetch('https://users.roblox.com/v1/users/search?keyword=' + encodeURIComponent(query) + '&limit=10'); if (!search.ok) throw new Error('Roblox API failed'); const found = await search.json(); const lowered = query.toLowerCase(); return (found.data || []).find(u => (u.displayName || '').toLowerCase() === lowered || (u.name || '').toLowerCase() === lowered) || null; }
 async function bhGet(path) { const res = await fetch('https://bot-hosting.net/api/v1' + path, { headers: { Authorization: 'Bearer ' + BH_API_KEY } }); if (!res.ok) throw new Error('Bot-Hosting API ' + res.status); return res.json(); }
 function firstDate(values) { for (const value of values) { if (!value) continue; const time = new Date(value).getTime(); if (!Number.isNaN(time)) return time; } return null; }
@@ -63,6 +69,16 @@ async function checkVoiceRooms() {
     }
   }
 }
+async function ensureLanguagePanel() {
+  for (const guild of client.guilds.cache.values()) {
+    const channel = guild.channels.cache.find(c => c.isTextBased() && (c.name.includes('languange') || c.name.includes('language')));
+    if (!channel) continue;
+    const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+    if (messages && messages.some(m => m.author.id === client.user.id && m.components.some(row => row.components.some(b => b.customId === 'set_language')))) continue;
+    const menu = new StringSelectMenuBuilder().setCustomId('set_language').setPlaceholder('Choose your language').addOptions(LANGS.map(l => ({ label: l.name, value: l.id })));
+    await channel.send({ embeds: [new EmbedBuilder().setColor(0x5865F2).setTitle('Choose your language').setDescription('Pick a language. The bot will talk to you in that language. You can change it any time.')], components: [new ActionRowBuilder().addComponents(menu)] }).catch((err) => console.error('Language panel failed:', err.message));
+  }
+}
 function voicePanelRow() { return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('create_voice').setLabel('Create voice chat').setStyle(ButtonStyle.Primary)); }
 async function ensureVoicePanel() {
   for (const guild of client.guilds.cache.values()) {
@@ -81,7 +97,9 @@ client.on('error', (err) => console.error('[client error]', err));
 client.on('shardError', (err) => console.error('[shard error]', err));
 client.once('clientReady', async () => {
   console.log('Logged in as ' + client.user.tag);
+  loadLang();
   await ensureVoicePanel();
+  await ensureLanguagePanel();
   setInterval(() => checkVoiceRooms().catch((err) => console.error('Voice check failed:', err.message)), 60 * 1000);
   setInterval(async () => { const p = turkeyParts(); if ((p.weekday !== 'Mon' && p.weekday !== 'Fri') || p.hour !== '12') return; const key = p.month + '-' + p.day; if (sentStatusDays.has(key)) return; sentStatusDays.add(key); await sendStatusToConsole(); }, 60 * 1000);
   setInterval(() => checkRenewWarning().catch((err) => console.error('Renew check failed:', err.message)), 5 * 60 * 1000);
@@ -90,6 +108,12 @@ client.once('clientReady', async () => {
   try { if (GUILD_ID) await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands }); else await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); console.log('Successfully reloaded application (/) commands.'); } catch (error) { console.error('Command register error:', error); }
 });
 client.on('interactionCreate', async interaction => {
+  if (interaction.isStringSelectMenu() && interaction.customId === 'set_language') {
+    const lang = interaction.values[0];
+    userLang.set(interaction.user.id, lang);
+    saveLang();
+    return interaction.reply({ content: 'Language set to **' + langName(lang) + '**. You can change it any time.', ephemeral: true });
+  }
   if (interaction.isButton() && interaction.customId === 'close_verify_dm') { await interaction.message.delete().catch(() => {}); return; }
   if (interaction.isButton() && interaction.customId === 'create_voice') {
     const modal = new ModalBuilder().setCustomId('create_voice_modal').setTitle('Create voice chat').addComponents(
