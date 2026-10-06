@@ -10,8 +10,12 @@ const DM_CLOSE_MS = 15 * 60 * 1000;
 const AI_API_KEY = cleanEnv(process.env.AI_API_KEY);
 const AI_BASE_URL = (cleanEnv(process.env.AI_BASE_URL) || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
 const AI_MODEL = cleanEnv(process.env.AI_MODEL) || 'openrouter/auto';
+const BH_API_KEY = cleanEnv(process.env.BH_API_KEY);
+const BH_DEPLOYMENT_ID = cleanEnv(process.env.BH_DEPLOYMENT_ID);
+const BH_RENEW_AT = cleanEnv(process.env.BH_RENEW_AT);
 const startedAt = Date.now();
 const sentStatusDays = new Set();
+const warnedRenew = new Set();
 const CONSOLE_CHANNEL_NAME = '🚫-console';
 const VERIFIED_ROLE = 'MDC verified';
 const ROBLOX_VERIFIED_ROLE = 'Roblox Verified';
@@ -27,16 +31,58 @@ function isValidCode(raw) { const code = String(raw || '').trim().toUpperCase();
 function isStaff(member) { return member && member.roles.cache.some(r => r.name === OWNER_ROLE || r.name === MOD_ROLE); }
 function isProtected(member) { if (!member) return false; if (member.id === client.user.id || member.user?.bot) return true; return member.roles.cache.some(r => PROTECTED_ROLES.includes(r.name)); }
 function formatUptime(ms) { const s = Math.floor(ms / 1000); return Math.floor(s / 86400) + 'd ' + Math.floor((s % 86400) / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm'; }
-function statusEmbed() { return new EmbedBuilder().setColor(0x5865F2).setTitle('MDC Bot Status').addFields({ name: 'Status', value: client.isReady() ? 'Online' : 'Starting', inline: true }, { name: 'Ping', value: Math.round(client.ws.ping) + ' ms', inline: true }, { name: 'Uptime', value: formatUptime(Date.now() - startedAt), inline: true }, { name: 'Servers', value: String(client.guilds.cache.size), inline: true }, { name: 'AI chat', value: AI_API_KEY ? 'Enabled' : 'Disabled', inline: true }, { name: 'Commands', value: '/verify, /linkroblox, /unlinkroblox, /roblox, /status, /ban, /kick, /mute, /unmute, /unban', inline: false }).setTimestamp(); }
-async function sendStatusToConsole() { for (const guild of client.guilds.cache.values()) { const channel = guild.channels.cache.find(c => c.name === CONSOLE_CHANNEL_NAME || c.name.includes('console')); if (channel) await channel.send({ embeds: [statusEmbed()] }).catch(() => {}); } }
+function mb(bytes) { return Math.round((Number(bytes) || 0) / 1048576) + ' MB'; }
+function statusEmbed() { return new EmbedBuilder().setColor(0x5865F2).setTitle('MDC Bot Status').addFields({ name: 'Status', value: client.isReady() ? 'Online' : 'Starting', inline: true }, { name: 'Ping', value: Math.round(client.ws.ping) + ' ms', inline: true }, { name: 'Uptime', value: formatUptime(Date.now() - startedAt), inline: true }, { name: 'Servers', value: String(client.guilds.cache.size), inline: true }, { name: 'AI chat', value: AI_API_KEY ? 'Enabled' : 'Disabled', inline: true }, { name: 'Commands', value: '/verify, /status, /hostingstatus, /ban, /kick, /mute', inline: false }).setTimestamp(); }
+async function sendToConsole(payload) { for (const guild of client.guilds.cache.values()) { const channel = guild.channels.cache.find(c => c.name === CONSOLE_CHANNEL_NAME || c.name.includes('console')); if (channel) await channel.send(payload).catch(() => {}); } }
+async function sendStatusToConsole() { await sendToConsole({ embeds: [statusEmbed()] }); }
 function turkeyParts() { const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Istanbul', weekday: 'short', hour: '2-digit', day: '2-digit', month: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()); return Object.fromEntries(parts.map(p => [p.type, p.value])); }
 async function isVerifiedUser(userId) { if (verifiedUsers.has(userId)) return true; for (const guild of client.guilds.cache.values()) { const member = await guild.members.fetch(userId).catch(() => null); const role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE); if (member && role && member.roles.cache.has(role.id)) { verifiedUsers.add(userId); return true; } } return false; }
 async function askAi(userId, text) { if (!AI_API_KEY) return 'AI chat is not set up yet.'; const history = aiHistory.get(userId) || []; history.push({ role: 'user', content: String(text || '').slice(0, 500) }); const trimmed = history.slice(-8); const res = await fetch(AI_BASE_URL + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + AI_API_KEY, 'HTTP-Referer': 'https://mdcforlegal.github.io/MDC-VERIFY/', 'X-Title': 'MDC Bot' }, body: JSON.stringify({ model: AI_MODEL, max_tokens: 300, messages: [{ role: 'system', content: 'You are MDC Bot, a friendly Discord assistant. Always reply in the same language the user used. If they write in Turkish, reply in natural Turkish. Keep it short and appropriate for all ages. Do not discuss sexual content, violence, or illegal activity.' }, ...trimmed] }) }); if (!res.ok) return 'I could not answer right now. Try again in a moment.'; const data = await res.json(); const reply = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || 'I do not have an answer.'; const safe = reply.slice(0, 1700); trimmed.push({ role: 'assistant', content: safe }); aiHistory.set(userId, trimmed.slice(-8)); return safe; }
 async function lookupRoblox(input) { const query = input.trim(); const byUsername = await fetch('https://users.roblox.com/v1/usernames/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: [query], excludeBannedUsers: true }) }); if (byUsername.ok) { const data = await byUsername.json(); if (data.data && data.data.length) return data.data[0]; } const search = await fetch('https://users.roblox.com/v1/users/search?keyword=' + encodeURIComponent(query) + '&limit=10'); if (!search.ok) throw new Error('Roblox API failed'); const found = await search.json(); const lowered = query.toLowerCase(); return (found.data || []).find(u => (u.displayName || '').toLowerCase() === lowered || (u.name || '').toLowerCase() === lowered) || null; }
+async function bhGet(path) { const res = await fetch('https://bot-hosting.net/api/v1' + path, { headers: { Authorization: 'Bearer ' + BH_API_KEY } }); if (!res.ok) throw new Error('Bot-Hosting API ' + res.status); return res.json(); }
+function firstDate(values) { for (const value of values) { if (!value) continue; const time = new Date(value).getTime(); if (!Number.isNaN(time)) return time; } return null; }
+async function hostingInfo() {
+  if (!BH_API_KEY) throw new Error('BH_API_KEY is missing.');
+  const listed = await bhGet('/deployments');
+  const deployments = listed.deployments || listed.items || listed.data || [];
+  const deployment = deployments.find(d => d.id === BH_DEPLOYMENT_ID) || deployments[0];
+  if (!deployment) throw new Error('No deployment found.');
+  const [account, resources] = await Promise.all([
+    bhGet('/account').catch(() => null),
+    bhGet('/deployments/' + deployment.id + '/resources').catch(() => null)
+  ]);
+  const renewAt = firstDate([BH_RENEW_AT, account && account.plan && (account.plan.renewsAt || account.plan.expiresAt || account.plan.periodEnd), deployment.renewsAt, deployment.expiresAt]);
+  return { deployment, account, resources, renewAt };
+}
+function hostingEmbed(info) {
+  const d = info.deployment; const r = info.resources || {}; const plan = info.account && info.account.plan;
+  const renew = info.renewAt ? '<t:' + Math.floor(info.renewAt / 1000) + ':R> (' + new Date(info.renewAt).toISOString() + ')' : 'Set BH_RENEW_AT. The API does not show free renew time.';
+  return new EmbedBuilder().setColor(0x57F287).setTitle('Bot-Hosting status').addFields(
+    { name: 'Server', value: d.name || d.id, inline: true },
+    { name: 'State', value: (r.state || d.state || 'unknown'), inline: true },
+    { name: 'Plan', value: plan ? (plan.name || plan.tier || 'unknown') + ' / ' + (plan.status || 'unknown') : 'unknown', inline: true },
+    { name: 'CPU', value: r.cpu ? Math.round(r.cpu.usedPercent || 0) + '% / ' + (r.cpu.limitPercent || '?') + '%' : 'unknown', inline: true },
+    { name: 'RAM', value: r.memory ? mb(r.memory.usedBytes) + ' / ' + mb(r.memory.limitBytes) : 'unknown', inline: true },
+    { name: 'Uptime', value: r.uptimeMs ? formatUptime(r.uptimeMs) : 'unknown', inline: true },
+    { name: 'Renew', value: renew, inline: false }
+  ).setTimestamp();
+}
+async function checkRenewWarning() {
+  if (!BH_API_KEY) return;
+  const info = await hostingInfo();
+  if (!info.renewAt) return;
+  const left = info.renewAt - Date.now();
+  if (left <= 0 || left > 30 * 60 * 1000) return;
+  const key = String(info.renewAt);
+  if (warnedRenew.has(key)) return;
+  warnedRenew.add(key);
+  await sendToConsole({ embeds: [new EmbedBuilder().setColor(0xFEE75C).setTitle('Renew warning').setDescription('Bot-Hosting renew time is in under 30 minutes. Renew the free plan before it expires.').addFields({ name: 'Renew', value: '<t:' + Math.floor(info.renewAt / 1000) + ':R>' }).setTimestamp()] });
+}
 function verifyDmRow() { return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Close').setStyle(ButtonStyle.Secondary)); }
 const VERIFY_DM = 'Thanks for joining the MDC Discord server.\n\nYour account is now verified. Read the rules, then jump into the channels.\n\nYou can also message me in this DM and I will reply.\n\nPress Close to remove this message. If you leave it, it will be deleted in 15 minutes.';
 const commands = [
   new SlashCommandBuilder().setName('status').setDescription('Show the bot status'),
+  new SlashCommandBuilder().setName('hostingstatus').setDescription('Staff: show Bot-Hosting server status'),
   new SlashCommandBuilder().setName('testlogs').setDescription('Staff test: send a log to the console channel'),
   new SlashCommandBuilder().setName('testverify').setDescription('Staff test: send the verify DM without verifying'),
   new SlashCommandBuilder().setName('teststatus').setDescription('Staff test: send the status report now'),
@@ -58,7 +104,9 @@ client.on('shardError', (err) => console.error('[shard error]', err));
 client.once('clientReady', async () => {
   console.log('Logged in as ' + client.user.tag);
   console.log(AI_API_KEY ? 'AI chat enabled.' : 'AI chat disabled. AI_API_KEY is missing.');
+  console.log(BH_API_KEY ? 'Bot-Hosting status enabled.' : 'Bot-Hosting status disabled. BH_API_KEY is missing.');
   setInterval(async () => { const p = turkeyParts(); if (p.weekday !== 'Mon' && p.weekday !== 'Fri') return; if (p.hour !== '12') return; const key = p.month + '-' + p.day; if (sentStatusDays.has(key)) return; sentStatusDays.add(key); await sendStatusToConsole(); }, 60 * 1000);
+  setInterval(() => checkRenewWarning().catch((err) => console.error('Renew check failed:', err.message)), 5 * 60 * 1000);
   if (!CLIENT_ID) return console.log('CLIENT_ID is missing.');
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try { if (GUILD_ID) await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands }); else await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); console.log('Successfully reloaded application (/) commands.'); } catch (error) { console.error('Command register error:', error); }
@@ -70,6 +118,11 @@ client.on('interactionCreate', async interaction => {
   if (commandName === 'status') return interaction.reply({ embeds: [statusEmbed()] });
   async function sendLog(embed) { const channel = guild.channels.cache.find(c => c.name === CONSOLE_CHANNEL_NAME || c.name.includes('console')); if (channel) await channel.send({ embeds: [embed] }).catch(() => {}); }
   async function protectedTarget(targetUser) { if (!targetUser || targetUser.id === client.user.id || targetUser.bot) return true; return isProtected(await guild.members.fetch(targetUser.id).catch(() => null)); }
+  if (commandName === 'hostingstatus') {
+    if (!isStaff(member)) return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+    try { return interaction.editReply({ embeds: [hostingEmbed(await hostingInfo())] }); } catch (err) { return interaction.editReply('Could not read Bot-Hosting: ' + err.message); }
+  }
   if (STAFF_TESTS.includes(commandName)) {
     if (!isStaff(member)) return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
     if (commandName === 'testlogs') { await sendLog(new EmbedBuilder().setColor(0xFEE75C).setTitle('Test log').setDescription(user + ' sent a test log.').setTimestamp()); return interaction.reply({ content: 'Test log sent to the console channel.', ephemeral: true }); }
