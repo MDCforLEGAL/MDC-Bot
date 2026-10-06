@@ -26,7 +26,9 @@ const PROTECTED_ROLES = ['Owner', 'Moderator', 'MDC BOT', 'MDC Bot'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const STAFF_TESTS = ['testlogs', 'testverify', 'teststatus', 'testai', 'testroblox'];
 const CHANNEL_AI_NOTE = '-# Mentioning the bot can look like spam in some channels. Use DMs for longer chats.';
-const usedCodes = new Set(); const verifiedUsers = new Set(); const warnings = new Map(); const robloxLinks = new Map(); const aiHistory = new Map();
+const usedCodes = new Set(); const verifiedUsers = new Set(); const warnings = new Map(); const robloxLinks = new Map(); const aiHistory = new Map(); const voiceRooms = new Map();
+const VOICE_EMPTY_CLOSE = 15 * 60 * 1000;
+const VOICE_EMPTY_WARN = 10 * 60 * 1000;
 function checksum(body) { let a = 0, b = 0; for (let i = 0; i < body.length; i++) { const n = CODE_CHARS.indexOf(body[i]); if (n < 0) return null; a = (a + (n + 3) * (i + 7)) % CODE_CHARS.length; b = (b + a + n * 5) % CODE_CHARS.length; } return CODE_CHARS[a] + CODE_CHARS[b]; }
 function isValidCode(raw) { const code = String(raw || '').trim().toUpperCase(); return /^MDC-[A-Z2-9]{8}$/.test(code) && checksum(code.slice(4, 10)) === code.slice(10); }
 function isStaff(member) { return member && member.roles.cache.some(r => r.name === OWNER_ROLE || r.name === MOD_ROLE); }
@@ -45,6 +47,22 @@ function firstDate(values) { for (const value of values) { if (!value) continue;
 async function hostingInfo() { if (!BH_API_KEY) throw new Error('BH_API_KEY is missing.'); const listed = await bhGet('/deployments'); const deployments = listed.deployments || listed.items || listed.data || []; const deployment = deployments.find(d => d.id === BH_DEPLOYMENT_ID) || deployments[0]; if (!deployment) throw new Error('No deployment found.'); const [account, resources] = await Promise.all([bhGet('/account').catch(() => null), bhGet('/deployments/' + deployment.id + '/resources').catch(() => null)]); return { deployment, account, resources, renewAt: firstDate([BH_RENEW_AT, account && account.plan && (account.plan.renewsAt || account.plan.expiresAt || account.plan.periodEnd), deployment.renewsAt, deployment.expiresAt]) }; }
 function hostingEmbed(info) { const d = info.deployment; const r = info.resources || {}; const plan = info.account && info.account.plan; const renew = info.renewAt ? '<t:' + Math.floor(info.renewAt / 1000) + ':R>' : 'Set BH_RENEW_AT.'; return new EmbedBuilder().setColor(0x57F287).setTitle('Bot-Hosting status').addFields({ name: 'Server', value: d.name || d.id, inline: true }, { name: 'State', value: r.state || d.state || 'unknown', inline: true }, { name: 'Plan', value: plan ? (plan.name || plan.tier || 'unknown') : 'unknown', inline: true }, { name: 'CPU', value: r.cpu ? Math.round(r.cpu.usedPercent || 0) + '%' : 'unknown', inline: true }, { name: 'RAM', value: r.memory ? mb(r.memory.usedBytes) + ' / ' + mb(r.memory.limitBytes) : 'unknown', inline: true }, { name: 'Renew', value: renew, inline: true }).setTimestamp(); }
 async function checkRenewWarning() { if (!BH_API_KEY) return; const info = await hostingInfo(); if (!info.renewAt) return; const left = info.renewAt - Date.now(); if (left <= 0 || left > 30 * 60 * 1000 || warnedRenew.has(String(info.renewAt))) return; warnedRenew.add(String(info.renewAt)); await sendToConsole({ embeds: [new EmbedBuilder().setColor(0xFEE75C).setTitle('Renew warning').setDescription('Bot-Hosting renew time is in under 30 minutes.').addFields({ name: 'Renew', value: '<t:' + Math.floor(info.renewAt / 1000) + ':R>' }).setTimestamp()] }); }
+function trackVoice(channel, ownerId) { voiceRooms.set(channel.id, { ownerId, emptySince: Date.now(), warned: false, guildId: channel.guild.id }); }
+async function checkVoiceRooms() {
+  for (const [id, room] of voiceRooms) {
+    const guild = client.guilds.cache.get(room.guildId);
+    const channel = guild && guild.channels.cache.get(id);
+    if (!channel) { voiceRooms.delete(id); continue; }
+    if (channel.members.size > 0) { room.emptySince = Date.now(); room.warned = false; continue; }
+    const emptyFor = Date.now() - room.emptySince;
+    if (emptyFor >= VOICE_EMPTY_CLOSE) { voiceRooms.delete(id); await channel.delete('Empty for 15 minutes').catch(() => {}); continue; }
+    if (emptyFor >= VOICE_EMPTY_WARN && !room.warned) {
+      room.warned = true;
+      const user = await client.users.fetch(room.ownerId).catch(() => null);
+      if (user) await user.send('<@' + room.ownerId + '> Your voice chat **' + channel.name + '** will close in 5 minutes if it stays empty.').catch(() => {});
+    }
+  }
+}
 function voicePanelRow() { return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('create_voice').setLabel('Create voice chat').setStyle(ButtonStyle.Primary)); }
 async function ensureVoicePanel() {
   for (const guild of client.guilds.cache.values()) {
@@ -64,6 +82,7 @@ client.on('shardError', (err) => console.error('[shard error]', err));
 client.once('clientReady', async () => {
   console.log('Logged in as ' + client.user.tag);
   await ensureVoicePanel();
+  setInterval(() => checkVoiceRooms().catch((err) => console.error('Voice check failed:', err.message)), 60 * 1000);
   setInterval(async () => { const p = turkeyParts(); if ((p.weekday !== 'Mon' && p.weekday !== 'Fri') || p.hour !== '12') return; const key = p.month + '-' + p.day; if (sentStatusDays.has(key)) return; sentStatusDays.add(key); await sendStatusToConsole(); }, 60 * 1000);
   setInterval(() => checkRenewWarning().catch((err) => console.error('Renew check failed:', err.message)), 5 * 60 * 1000);
   if (!CLIENT_ID) return;
@@ -90,7 +109,8 @@ client.on('interactionCreate', async interaction => {
     const overwrites = isPrivate ? [{ id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel] }, { id: interaction.user.id, allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels] }] : [];
     try {
       const voice = await interaction.guild.channels.create({ name, type: ChannelType.GuildVoice, parent: panel && panel.parentId, userLimit: limit, bitrate, permissionOverwrites: overwrites });
-      return interaction.reply({ content: 'Voice chat created: <#' + voice.id + '>', ephemeral: true });
+      trackVoice(voice, interaction.user.id);
+      return interaction.reply({ content: 'Voice chat created: <#' + voice.id + '>. It closes after 15 minutes empty.', ephemeral: true });
     } catch (err) { return interaction.reply({ content: 'Could not create the voice chat. Give the bot Manage Channels. ' + err.message, ephemeral: true }); }
   }
   if (!interaction.isChatInputCommand()) return;
