@@ -15,7 +15,6 @@ const BH_API_KEY = cleanEnv(process.env.BH_API_KEY);
 const BH_DEPLOYMENT_ID = cleanEnv(process.env.BH_DEPLOYMENT_ID);
 const BH_RENEW_AT = cleanEnv(process.env.BH_RENEW_AT);
 const startedAt = Date.now();
-const sentStatusDays = new Set();
 const warnedRenew = new Set();
 const CONSOLE_CHANNEL_NAME = '🚫-console';
 const VOICE_PANEL_NAME = 'creat-voice-chat';
@@ -46,8 +45,6 @@ function formatUptime(ms) { const s = Math.floor(ms / 1000); return Math.floor(s
 function mb(bytes) { return Math.round((Number(bytes) || 0) / 1048576) + ' MB'; }
 function statusEmbed() { return new EmbedBuilder().setColor(0x5865F2).setTitle('MDC Bot Status').addFields({ name: 'Status', value: client.isReady() ? 'Online' : 'Starting', inline: true }, { name: 'Ping', value: Math.round(client.ws.ping) + ' ms', inline: true }, { name: 'Uptime', value: formatUptime(Date.now() - startedAt), inline: true }, { name: 'Servers', value: String(client.guilds.cache.size), inline: true }, { name: 'AI chat', value: 'Personal keys', inline: true }).setTimestamp(); }
 async function sendToConsole(payload) { for (const guild of client.guilds.cache.values()) { const channel = guild.channels.cache.find(c => c.name === CONSOLE_CHANNEL_NAME || c.name.includes('console')); if (channel) await channel.send(payload).catch(() => {}); } }
-async function sendStatusToConsole() { await sendToConsole({ embeds: [statusEmbed()] }); }
-function turkeyParts() { const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Istanbul', weekday: 'short', hour: '2-digit', day: '2-digit', month: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()); return Object.fromEntries(parts.map(p => [p.type, p.value])); }
 async function isVerifiedUser(userId) { if (verifiedUsers.has(userId)) return true; for (const guild of client.guilds.cache.values()) { const member = await guild.members.fetch(userId).catch(() => null); const role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE); if (member && role && member.roles.cache.has(role.id)) { verifiedUsers.add(userId); return true; } } return false; }
 async function askAi(userId, text) { const key = userAiKeys.get(userId); if (!key) return 'Set your own key in a DM with /aiapikey. The bot does not use a shared key.'; const history = aiHistory.get(userId) || []; history.push({ role: 'user', content: String(text || '').slice(0, 500) }); const trimmed = history.slice(-8); const chosen = langName(userLang.get(userId)); const res = await fetch(AI_BASE_URL + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key, 'HTTP-Referer': 'https://mdcforlegal.github.io/MDC-VERIFY/', 'X-Title': 'MDC Bot' }, body: JSON.stringify({ model: AI_MODEL, max_tokens: 300, messages: [{ role: 'system', content: 'You are MDC Bot, a friendly Discord assistant. Reply in ' + (chosen || 'the same language the user used') + '. Keep it short and appropriate for all ages. Do not discuss sexual content, violence, or illegal activity.' }, ...trimmed] }) }); if (!res.ok) return 'Your API key was rejected. Check it with /aiapikey.'; const data = await res.json(); const safe = ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || 'I do not have an answer.').slice(0, 1700); trimmed.push({ role: 'assistant', content: safe }); aiHistory.set(userId, trimmed.slice(-8)); return safe; }
 async function lookupRoblox(input) { const query = input.trim(); const byUsername = await fetch('https://users.roblox.com/v1/usernames/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: [query], excludeBannedUsers: true }) }); if (byUsername.ok) { const data = await byUsername.json(); if (data.data && data.data.length) return data.data[0]; } const search = await fetch('https://users.roblox.com/v1/users/search?keyword=' + encodeURIComponent(query) + '&limit=10'); if (!search.ok) throw new Error('Roblox API failed'); const found = await search.json(); const lowered = query.toLowerCase(); return (found.data || []).find(u => (u.displayName || '').toLowerCase() === lowered || (u.name || '').toLowerCase() === lowered) || null; }
@@ -82,6 +79,22 @@ async function ensureLanguagePanel() {
     await channel.send({ embeds: [new EmbedBuilder().setColor(0x5865F2).setTitle('Choose your language').setDescription('Pick a language. The bot will talk to you in that language. You can change it any time.')], components: [new ActionRowBuilder().addComponents(menu)] }).catch((err) => console.error('Language panel failed:', err.message));
   }
 }
+const statusMessages = new Map();
+async function updateStatusBoard() {
+  for (const guild of client.guilds.cache.values()) {
+    const channel = guild.channels.cache.find(c => c.isTextBased() && (c.name.includes('bot_status') || c.name.includes('bot-status')));
+    if (!channel) continue;
+    let message = statusMessages.get(guild.id);
+    if (message) message = await message.fetch().catch(() => null);
+    if (!message) {
+      const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+      message = messages && messages.find(m => m.author.id === client.user.id && m.embeds[0] && m.embeds[0].title === 'MDC Bot Status');
+    }
+    if (message) message = await message.edit({ embeds: [statusEmbed()] }).catch(() => null);
+    else message = await channel.send({ embeds: [statusEmbed()] }).catch(() => null);
+    if (message) statusMessages.set(guild.id, message);
+  }
+}
 function voicePanelRow() { return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('create_voice').setLabel('Create voice chat').setStyle(ButtonStyle.Primary)); }
 async function ensureVoicePanel() {
   for (const guild of client.guilds.cache.values()) {
@@ -105,7 +118,8 @@ client.once('clientReady', async () => {
   await ensureVoicePanel();
   await ensureLanguagePanel();
   setInterval(() => checkVoiceRooms().catch((err) => console.error('Voice check failed:', err.message)), 60 * 1000);
-  setInterval(async () => { const p = turkeyParts(); if ((p.weekday !== 'Mon' && p.weekday !== 'Fri') || p.hour !== '12') return; const key = p.month + '-' + p.day; if (sentStatusDays.has(key)) return; sentStatusDays.add(key); await sendStatusToConsole(); }, 60 * 1000);
+  await updateStatusBoard();
+  setInterval(() => updateStatusBoard().catch((err) => console.error('Status board failed:', err.message)), 60 * 1000);
   setInterval(() => checkRenewWarning().catch((err) => console.error('Renew check failed:', err.message)), 5 * 60 * 1000);
   if (!CLIENT_ID) return;
   const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -159,7 +173,7 @@ client.on('interactionCreate', async interaction => {
     if (!isStaff(member)) return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
     if (commandName === 'testlogs') { await sendLog(new EmbedBuilder().setColor(0xFEE75C).setTitle('Test log').setDescription(user + ' sent a test log.').setTimestamp()); return interaction.reply({ content: 'Test log sent to the console channel.', ephemeral: true }); }
     if (commandName === 'testverify') { try { const dm = await user.send({ content: '[TEST]\n\n' + VERIFY_DM, components: [verifyDmRow()] }); setTimeout(() => dm.delete().catch(() => {}), DM_CLOSE_MS); return interaction.reply({ content: 'Test verify DM sent. No role was given.', ephemeral: true }); } catch { return interaction.reply({ content: 'Could not send the test DM.', ephemeral: true }); } }
-    if (commandName === 'teststatus') { await sendStatusToConsole(); return interaction.reply({ content: 'Status sent to the console channel.', ephemeral: true }); }
+    if (commandName === 'teststatus') { await updateStatusBoard(); return interaction.reply({ content: 'Status board updated.', ephemeral: true }); }
     if (commandName === 'testai') { await interaction.deferReply({ ephemeral: true }); return interaction.editReply(await askAi(user.id, 'Reply with: MDC AI test ok.')); }
     if (commandName === 'testroblox') { await interaction.deferReply({ ephemeral: true }); try { const roblox = await lookupRoblox(options.getString('username')); if (!roblox) return interaction.editReply('Not found. No account was linked.'); return interaction.editReply('Found **' + (roblox.displayName || roblox.name) + '**. No account was linked.'); } catch { return interaction.editReply('Roblox lookup failed.'); } }
   }
