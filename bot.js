@@ -34,13 +34,13 @@ function saveLang() { try { fs.writeFileSync(LANG_FILE, JSON.stringify(Object.fr
 const activity = new Map();
 const ACTIVITY_FILE = './activity.json';
 const RANKS = [
-  { name: 'silver', min: 25, activeDays: 30 },
-  { name: 'iron', min: 100, activeDays: 30 },
-  { name: 'gold', min: 300, activeDays: 21 },
-  { name: 'diamond', min: 750, activeDays: 21 },
-  { name: 'amethyst', min: 1500, activeDays: 14 },
-  { name: 'emerald', min: 3000, activeDays: 14 },
-  { name: 'GOD', min: 7500, activeDays: 7 }
+  { name: 'silver', emoji: '⚪', min: 25, activeDays: 30 },
+  { name: 'iron', emoji: '⚙️', min: 100, activeDays: 30 },
+  { name: 'gold', emoji: '⭐', min: 300, activeDays: 21 },
+  { name: 'diamond', emoji: '💎', min: 750, activeDays: 21 },
+  { name: 'amethyst', emoji: '💜', min: 1500, activeDays: 14 },
+  { name: 'emerald', emoji: '💚', min: 3000, activeDays: 14 },
+  { name: 'GOD', emoji: '👑', min: 7500, activeDays: 7 }
 ];
 const RANK_NAMES = RANKS.map(r => r.name);
 function loadActivity() { try { for (const [id, stats] of Object.entries(JSON.parse(fs.readFileSync(ACTIVITY_FILE, 'utf8')))) activity.set(id, stats); } catch {} }
@@ -52,6 +52,11 @@ function rankFor(stats) {
   for (const rank of RANKS) if (stats.count >= rank.min && days <= rank.activeDays) best = rank;
   return best;
 }
+function cleanRankNick(name) {
+  let clean = String(name || '').trim();
+  for (const rank of RANKS) if (clean.startsWith(rank.emoji + ' ')) clean = clean.slice(rank.emoji.length + 1).trim();
+  return clean;
+}
 async function syncRank(member) {
   if (!member || member.user.bot) return;
   const target = rankFor(activity.get(member.id));
@@ -62,6 +67,10 @@ async function syncRank(member) {
     if (name === (target && target.name) && !has) await member.roles.add(role).catch(() => {});
     if (name !== (target && target.name) && has) await member.roles.remove(role).catch(() => {});
   }
+  if (isStaff(member)) return;
+  const base = cleanRankNick(robloxLinks.get(member.id) || member.nickname || member.user.username);
+  const next = (target ? target.emoji + ' ' + base : base).slice(0, 32);
+  if ((member.nickname || '') !== next) await member.setNickname(next).catch(() => {});
 }
 async function refreshInactiveRanks() {
   for (const guild of client.guilds.cache.values()) {
@@ -227,8 +236,8 @@ client.on('interactionCreate', async interaction => {
     try { const dm = await user.send({ content: VERIFY_DM, components: [verifyDmRow()] }); setTimeout(() => dm.delete().catch(() => {}), DM_CLOSE_MS); } catch { console.log('Could not DM verified user.'); }
     return;
   }
-  if (commandName === 'linkroblox') { if (robloxLinks.has(user.id)) return interaction.reply({ content: 'You already have a Roblox account linked. Use /unlinkroblox first.', ephemeral: true }); await interaction.deferReply({ ephemeral: true }); let roblox; try { roblox = await lookupRoblox(options.getString('username').trim()); } catch { return interaction.editReply('Could not reach Roblox. Try again.'); } if (!roblox) return interaction.editReply('That Roblox account name was not found.'); const shown = roblox.displayName || roblox.name; robloxLinks.set(user.id, shown); const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE); if (role) await member.roles.add(role).catch(() => {}); let nickNote = ''; if (isStaff(member)) nickNote = ' Staff nickname was left unchanged.'; else { try { await member.setNickname(shown.slice(0, 32)); } catch { nickNote = ' Nickname was not changed.'; } } await interaction.editReply('Linked Roblox account **' + shown + '**.' + nickNote); await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(user + ' linked **' + shown + '**').setTimestamp()); return; }
-  if (commandName === 'unlinkroblox') { if (!robloxLinks.has(user.id)) return interaction.reply({ content: 'You do not have a Roblox account linked.', ephemeral: true }); const oldName = robloxLinks.get(user.id); robloxLinks.delete(user.id); const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE); if (role) await member.roles.remove(role).catch(() => {}); if (!isStaff(member)) await member.setNickname(null).catch(() => {}); return interaction.reply({ content: 'Unlinked Roblox account: **' + oldName + '**', ephemeral: true }); }
+  if (commandName === 'linkroblox') { if (robloxLinks.has(user.id)) return interaction.reply({ content: 'You already have a Roblox account linked. Use /unlinkroblox first.', ephemeral: true }); await interaction.deferReply({ ephemeral: true }); let roblox; try { roblox = await lookupRoblox(options.getString('username').trim()); } catch { return interaction.editReply('Could not reach Roblox. Try again.'); } if (!roblox) return interaction.editReply('That Roblox account name was not found.'); const shown = roblox.displayName || roblox.name; robloxLinks.set(user.id, shown); const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE); if (role) await member.roles.add(role).catch(() => {}); let nickNote = ''; if (isStaff(member)) nickNote = ' Staff nickname was left unchanged.'; else { try { await member.setNickname(shown.slice(0, 32)); } catch { nickNote = ' Nickname was not changed.'; } } await syncRank(member); await interaction.editReply('Linked Roblox account **' + shown + '**.' + nickNote); await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(user + ' linked **' + shown + '**').setTimestamp()); return; }
+  if (commandName === 'unlinkroblox') { if (!robloxLinks.has(user.id)) return interaction.reply({ content: 'You do not have a Roblox account linked.', ephemeral: true }); const oldName = robloxLinks.get(user.id); robloxLinks.delete(user.id); const role = guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE); if (role) await member.roles.remove(role).catch(() => {}); if (!isStaff(member)) await member.setNickname(null).catch(() => {}); await syncRank(member); return interaction.reply({ content: 'Unlinked Roblox account: **' + oldName + '**', ephemeral: true }); }
   if (commandName === 'roblox') { const target = options.getUser('user') || user; const linked = robloxLinks.get(target.id); if (!linked) return interaction.reply({ content: target + ' has no Roblox account linked.', ephemeral: true }); return interaction.reply({ content: '**' + target.username + '** is linked to Roblox: **' + linked + '**', ephemeral: true }); }
   if (['ban', 'kick', 'mute', 'unmute'].includes(commandName)) { if (!isStaff(member)) return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true }); if (await protectedTarget(options.getUser('user'))) { await sendLog(new EmbedBuilder().setColor(0xED4245).setTitle('Blocked moderation').setDescription(user + ' tried to ' + commandName + ' a protected member.').setTimestamp()); return interaction.reply({ content: 'This member is protected. Action refused.', ephemeral: true }); } }
   if (commandName === 'unban' && !isStaff(member)) return interaction.reply({ content: 'Only Owner and Moderator can use this command.', ephemeral: true });
