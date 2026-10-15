@@ -81,6 +81,52 @@ async function refreshInactiveRanks() {
     }
   }
 }
+const boostCounts = new Map();
+const BOOST_FILE = './boosts.json';
+const boostBoards = new Map();
+function loadBoosts() { try { for (const [id, n] of Object.entries(JSON.parse(fs.readFileSync(BOOST_FILE, 'utf8')))) boostCounts.set(id, n); } catch {} }
+function saveBoosts() { try { fs.writeFileSync(BOOST_FILE, JSON.stringify(Object.fromEntries(boostCounts))); } catch {} }
+function boostChannel(guild) { return guild.channels.cache.find(c => c.isTextBased() && (c.name.includes('boosts') || c.name.includes('🔥'))); }
+function boostBar(n) { const filled = Math.max(0, Math.min(10, n)); return '🔥'.repeat(filled) + '▫️'.repeat(10 - filled); }
+function boostEmbed(member, frame, total, personal, tier) {
+  return new EmbedBuilder().setColor(0xF47FFF).setTitle(frame + ' Server boost').setDescription('<@' + member.id + '> thank you for boosting the server!\n\n' + boostBar(personal)).addFields({ name: 'Your boosts', value: String(personal), inline: true }, { name: 'Server boosts', value: String(total), inline: true }, { name: 'Level', value: 'Tier ' + tier, inline: true }).setTimestamp();
+}
+async function thankBoost(member) {
+  const channel = boostChannel(member.guild);
+  if (!channel) return;
+  await member.guild.fetch().catch(() => {});
+  const total = member.guild.premiumSubscriptionCount || 0;
+  const tier = member.guild.premiumTier || 0;
+  const personal = (boostCounts.get(member.id) || 0) + 1;
+  boostCounts.set(member.id, personal);
+  saveBoosts();
+  const frames = ['🔥', '✨', '🔥', '🎉', '🔥'];
+  const message = await channel.send({ content: '<@' + member.id + '>', embeds: [boostEmbed(member, frames[0], Math.max(1, total - 1), personal, tier)] }).catch(() => null);
+  if (!message) return;
+  for (let i = 1; i < frames.length; i++) {
+    await new Promise(r => setTimeout(r, 800));
+    await message.edit({ embeds: [boostEmbed(member, frames[i], total, personal, tier)] }).catch(() => {});
+  }
+  await updateBoostBoard(member.guild);
+}
+async function updateBoostBoard(guild) {
+  const channel = boostChannel(guild);
+  if (!channel) return;
+  await guild.fetch().catch(() => {});
+  const total = guild.premiumSubscriptionCount || 0;
+  const tier = guild.premiumTier || 0;
+  const lines = [...boostCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, n], i) => (i + 1) + '. <@' + id + '> — ' + n + ' boost' + (n === 1 ? '' : 's')).join('\n') || 'No boosts tracked yet.';
+  const embed = new EmbedBuilder().setColor(0xF47FFF).setTitle('🔥 Boosts').setDescription(boostBar(Math.min(10, total)) + '\n\n**' + total + '** boosts · Tier **' + tier + '**\n\n' + lines).setTimestamp();
+  let message = boostBoards.get(guild.id);
+  if (message) message = await message.fetch().catch(() => null);
+  if (!message) {
+    const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+    message = messages && messages.find(m => m.author.id === client.user.id && m.embeds[0] && m.embeds[0].title === '🔥 Boosts');
+  }
+  if (message) message = await message.edit({ embeds: [embed] }).catch(() => null);
+  else message = await channel.send({ embeds: [embed] }).catch(() => null);
+  if (message) boostBoards.set(guild.id, message);
+}
 function langName(id) { return (LANGS.find(l => l.id === id) || {}).name || id; }
 const VOICE_EMPTY_CLOSE = 15 * 60 * 1000;
 const VOICE_EMPTY_WARN = 10 * 60 * 1000;
@@ -163,6 +209,7 @@ client.once('clientReady', async () => {
   console.log(AI_API_KEY ? 'AI chat enabled.' : 'AI chat disabled. AI_API_KEY is missing.');
   loadLang();
   loadActivity();
+  loadBoosts();
   await ensureVoicePanel();
   await ensureLanguagePanel();
   setInterval(() => checkVoiceRooms().catch((err) => console.error('Voice check failed:', err.message)), 60 * 1000);
@@ -170,6 +217,8 @@ client.once('clientReady', async () => {
   setInterval(() => updateStatusBoard().catch((err) => console.error('Status board failed:', err.message)), 60 * 1000);
   setInterval(() => checkRenewWarning().catch((err) => console.error('Renew check failed:', err.message)), 5 * 60 * 1000);
   setInterval(() => { saveActivity(); refreshInactiveRanks().catch((err) => console.error('Rank refresh failed:', err.message)); }, 30 * 60 * 1000);
+  for (const guild of client.guilds.cache.values()) await updateBoostBoard(guild).catch(() => {});
+  setInterval(() => { for (const guild of client.guilds.cache.values()) updateBoostBoard(guild).catch(() => {}); }, 10 * 60 * 1000);
   if (!CLIENT_ID) return;
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try { if (GUILD_ID) await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands }); else await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); console.log('Successfully reloaded application (/) commands.'); } catch (error) { console.error('Command register error:', error); }
@@ -246,6 +295,9 @@ client.on('interactionCreate', async interaction => {
   if (commandName === 'mute') { const target = options.getUser('user'); const reason = options.getString('reason'); const minutes = options.getInteger('minutes') || 60; const targetMember = await guild.members.fetch(target.id).catch(() => null); if (!targetMember) return interaction.reply({ content: 'That user is not in this server.', ephemeral: true }); if (!targetMember.moderatable) return interaction.reply({ content: 'I cannot mute that user. Check role order.', ephemeral: true }); await targetMember.timeout(minutes * 60 * 1000, user.tag + ': ' + reason); await interaction.reply({ content: 'Muted **' + target.tag + '** for ' + minutes + ' minutes.', ephemeral: true }); await sendLog(new EmbedBuilder().setColor(0xF1C40F).setTitle('User Muted').setDescription(user + ' muted ' + target.tag).setTimestamp()); return; }
   if (commandName === 'unmute') { const target = options.getUser('user'); const targetMember = await guild.members.fetch(target.id).catch(() => null); if (!targetMember) return interaction.reply({ content: 'That user is not in this server.', ephemeral: true }); await targetMember.timeout(null); await interaction.reply({ content: 'Unmuted **' + target.tag + '**.', ephemeral: true }); await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('User Unmuted').setDescription(user + ' unmuted ' + target.tag).setTimestamp()); return; }
   if (commandName === 'unban') { const userId = options.getString('userid').trim(); const reason = options.getString('reason') || 'No reason'; if (!/^\d{17,20}$/.test(userId)) return interaction.reply({ content: 'Enter a valid user ID.', ephemeral: true }); if (userId === client.user.id) return interaction.reply({ content: 'This member is protected. Action refused.', ephemeral: true }); await guild.members.unban(userId, user.tag + ': ' + reason); await interaction.reply({ content: 'Unbanned <@' + userId + '>.', ephemeral: true }); await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('User Unbanned').setDescription(user + ' unbanned ' + userId).setTimestamp()); }
+});
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+  if (!oldMember.premiumSince && newMember.premiumSince) await thankBoost(newMember).catch((err) => console.error('Boost thanks failed:', err.message));
 });
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
