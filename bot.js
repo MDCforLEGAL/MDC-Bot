@@ -31,6 +31,47 @@ const LANGS = [{id:'en',name:'English'},{id:'tr',name:'Türkçe'},{id:'de',name:
 const LANG_FILE = './language-prefs.json';
 function loadLang() { try { for (const [id, lang] of Object.entries(JSON.parse(fs.readFileSync(LANG_FILE, 'utf8')))) userLang.set(id, lang); } catch {} }
 function saveLang() { try { fs.writeFileSync(LANG_FILE, JSON.stringify(Object.fromEntries(userLang))); } catch {} }
+const activity = new Map();
+const ACTIVITY_FILE = './activity.json';
+const RANKS = [
+  { name: 'silver', min: 25, activeDays: 30 },
+  { name: 'iron', min: 100, activeDays: 30 },
+  { name: 'gold', min: 300, activeDays: 21 },
+  { name: 'diamond', min: 750, activeDays: 21 },
+  { name: 'amethyst', min: 1500, activeDays: 14 },
+  { name: 'emerald', min: 3000, activeDays: 14 },
+  { name: 'GOD', min: 7500, activeDays: 7 }
+];
+const RANK_NAMES = RANKS.map(r => r.name);
+function loadActivity() { try { for (const [id, stats] of Object.entries(JSON.parse(fs.readFileSync(ACTIVITY_FILE, 'utf8')))) activity.set(id, stats); } catch {} }
+function saveActivity() { try { fs.writeFileSync(ACTIVITY_FILE, JSON.stringify(Object.fromEntries(activity))); } catch {} }
+function rankFor(stats) {
+  if (!stats) return null;
+  const days = (Date.now() - (stats.last || 0)) / 86400000;
+  let best = null;
+  for (const rank of RANKS) if (stats.count >= rank.min && days <= rank.activeDays) best = rank;
+  return best;
+}
+async function syncRank(member) {
+  if (!member || member.user.bot) return;
+  const target = rankFor(activity.get(member.id));
+  for (const name of RANK_NAMES) {
+    const role = member.guild.roles.cache.find(r => r.name === name);
+    if (!role) continue;
+    const has = member.roles.cache.has(role.id);
+    if (name === (target && target.name) && !has) await member.roles.add(role).catch(() => {});
+    if (name !== (target && target.name) && has) await member.roles.remove(role).catch(() => {});
+  }
+}
+async function refreshInactiveRanks() {
+  for (const guild of client.guilds.cache.values()) {
+    for (const [id, stats] of activity) {
+      if (Date.now() - stats.last < 7 * 86400000) continue;
+      const member = await guild.members.fetch(id).catch(() => null);
+      if (member) await syncRank(member);
+    }
+  }
+}
 function langName(id) { return (LANGS.find(l => l.id === id) || {}).name || id; }
 const VOICE_EMPTY_CLOSE = 15 * 60 * 1000;
 const VOICE_EMPTY_WARN = 10 * 60 * 1000;
@@ -104,7 +145,7 @@ async function ensureVoicePanel() {
 }
 function verifyDmRow() { return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Close').setStyle(ButtonStyle.Secondary)); }
 const VERIFY_DM = 'Thanks for joining the MDC Discord server.\n\nYour account is now verified. Read the rules, then jump into the channels.\n\nYou can also message me in this DM and I will reply.\n\nPress Close to remove this message. If you leave it, it will be deleted in 15 minutes.';
-const commands = [new SlashCommandBuilder().setName('status').setDescription('Show the bot status'), new SlashCommandBuilder().setName('hostingstatus').setDescription('Staff: show Bot-Hosting server status'), new SlashCommandBuilder().setName('testlogs').setDescription('Staff test: send a log to the console channel'), new SlashCommandBuilder().setName('testverify').setDescription('Staff test: send the verify DM without verifying'), new SlashCommandBuilder().setName('teststatus').setDescription('Staff test: send the status report now'), new SlashCommandBuilder().setName('testai').setDescription('Staff test: check the AI reply'), new SlashCommandBuilder().setName('testroblox').setDescription('Staff test: look up a Roblox name without linking').addStringOption(o => o.setName('username').setDescription('Roblox display name').setRequired(true)), new SlashCommandBuilder().setName('verify').setDescription('Verify your account with a code from the MDC verify site').addStringOption(o => o.setName('code').setDescription('Verification code from the site').setRequired(true)), new SlashCommandBuilder().setName('linkroblox').setDescription('Link a real Roblox account').addStringOption(o => o.setName('username').setDescription('Your Roblox display name').setRequired(true)), new SlashCommandBuilder().setName('unlinkroblox').setDescription('Unlink your Roblox account'), new SlashCommandBuilder().setName('roblox').setDescription('Check linked Roblox account of a user').addUserOption(o => o.setName('user').setDescription('The user to check').setRequired(false)), new SlashCommandBuilder().setName('ban').setDescription('Ban a member').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addUserOption(o => o.setName('user').setDescription('Member to ban').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Ban reason').setRequired(true)), new SlashCommandBuilder().setName('kick').setDescription('Kick a member').setDefaultMemberPermissions(PermissionFlagsBits.KickMembers).addUserOption(o => o.setName('user').setDescription('Member to kick').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Kick reason').setRequired(true)), new SlashCommandBuilder().setName('mute').setDescription('Timeout a member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('user').setDescription('Member to mute').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Mute reason').setRequired(true)).addIntegerOption(o => o.setName('minutes').setDescription('Timeout minutes (default 60)').setMinValue(1).setMaxValue(40320)), new SlashCommandBuilder().setName('unmute').setDescription('Remove a timeout').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('user').setDescription('Member to unmute').setRequired(true)), new SlashCommandBuilder().setName('unban').setDescription('Unban a user by ID').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addStringOption(o => o.setName('userid').setDescription('User ID to unban').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Unban reason').setRequired(false))].map(cmd => cmd.toJSON());
+const commands = [new SlashCommandBuilder().setName('rank').setDescription('Show your message count and rank'), new SlashCommandBuilder().setName('status').setDescription('Show the bot status'), new SlashCommandBuilder().setName('hostingstatus').setDescription('Staff: show Bot-Hosting server status'), new SlashCommandBuilder().setName('testlogs').setDescription('Staff test: send a log to the console channel'), new SlashCommandBuilder().setName('testverify').setDescription('Staff test: send the verify DM without verifying'), new SlashCommandBuilder().setName('teststatus').setDescription('Staff test: send the status report now'), new SlashCommandBuilder().setName('testai').setDescription('Staff test: check the AI reply'), new SlashCommandBuilder().setName('testroblox').setDescription('Staff test: look up a Roblox name without linking').addStringOption(o => o.setName('username').setDescription('Roblox display name').setRequired(true)), new SlashCommandBuilder().setName('verify').setDescription('Verify your account with a code from the MDC verify site').addStringOption(o => o.setName('code').setDescription('Verification code from the site').setRequired(true)), new SlashCommandBuilder().setName('linkroblox').setDescription('Link a real Roblox account').addStringOption(o => o.setName('username').setDescription('Your Roblox display name').setRequired(true)), new SlashCommandBuilder().setName('unlinkroblox').setDescription('Unlink your Roblox account'), new SlashCommandBuilder().setName('roblox').setDescription('Check linked Roblox account of a user').addUserOption(o => o.setName('user').setDescription('The user to check').setRequired(false)), new SlashCommandBuilder().setName('ban').setDescription('Ban a member').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addUserOption(o => o.setName('user').setDescription('Member to ban').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Ban reason').setRequired(true)), new SlashCommandBuilder().setName('kick').setDescription('Kick a member').setDefaultMemberPermissions(PermissionFlagsBits.KickMembers).addUserOption(o => o.setName('user').setDescription('Member to kick').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Kick reason').setRequired(true)), new SlashCommandBuilder().setName('mute').setDescription('Timeout a member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('user').setDescription('Member to mute').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Mute reason').setRequired(true)).addIntegerOption(o => o.setName('minutes').setDescription('Timeout minutes (default 60)').setMinValue(1).setMaxValue(40320)), new SlashCommandBuilder().setName('unmute').setDescription('Remove a timeout').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('user').setDescription('Member to unmute').setRequired(true)), new SlashCommandBuilder().setName('unban').setDescription('Unban a user by ID').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addStringOption(o => o.setName('userid').setDescription('User ID to unban').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Unban reason').setRequired(false))].map(cmd => cmd.toJSON());
 client.on('warn', (info) => console.log('[warn]', info));
 client.on('error', (err) => console.error('[client error]', err));
 client.on('shardError', (err) => console.error('[shard error]', err));
@@ -112,12 +153,14 @@ client.once('clientReady', async () => {
   console.log('Logged in as ' + client.user.tag);
   console.log(AI_API_KEY ? 'AI chat enabled.' : 'AI chat disabled. AI_API_KEY is missing.');
   loadLang();
+  loadActivity();
   await ensureVoicePanel();
   await ensureLanguagePanel();
   setInterval(() => checkVoiceRooms().catch((err) => console.error('Voice check failed:', err.message)), 60 * 1000);
   await updateStatusBoard();
   setInterval(() => updateStatusBoard().catch((err) => console.error('Status board failed:', err.message)), 60 * 1000);
   setInterval(() => checkRenewWarning().catch((err) => console.error('Renew check failed:', err.message)), 5 * 60 * 1000);
+  setInterval(() => { saveActivity(); refreshInactiveRanks().catch((err) => console.error('Rank refresh failed:', err.message)); }, 30 * 60 * 1000);
   if (!CLIENT_ID) return;
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try { if (GUILD_ID) await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands }); else await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); console.log('Successfully reloaded application (/) commands.'); } catch (error) { console.error('Command register error:', error); }
@@ -154,6 +197,12 @@ client.on('interactionCreate', async interaction => {
   }
   if (!interaction.isChatInputCommand()) return;
   const { commandName, options, member, guild, user } = interaction;
+  if (commandName === 'rank') {
+    const stats = activity.get(user.id) || { count: 0, last: 0 };
+    const current = rankFor(stats);
+    const next = RANKS.find(r => r.min > stats.count);
+    return interaction.reply({ content: 'Messages: **' + stats.count + '**\nRank: **' + (current ? current.name : 'none') + '**' + (next ? '\nNext: **' + next.name + '** at ' + next.min + ' messages' : ''), ephemeral: true });
+  }
   if (commandName === 'status') return interaction.reply({ embeds: [statusEmbed()] });
   async function sendLog(embed) { const channel = guild.channels.cache.find(c => c.name === CONSOLE_CHANNEL_NAME || c.name.includes('console')); if (channel) await channel.send({ embeds: [embed] }).catch(() => {}); }
   async function protectedTarget(targetUser) { if (!targetUser || targetUser.id === client.user.id || targetUser.bot) return true; return isProtected(await guild.members.fetch(targetUser.id).catch(() => null)); }
@@ -191,6 +240,14 @@ client.on('interactionCreate', async interaction => {
 });
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
+  if (message.guild) {
+    const stats = activity.get(message.author.id) || { count: 0, last: 0 };
+    stats.count += 1;
+    stats.last = Date.now();
+    activity.set(message.author.id, stats);
+    if (stats.count % 10 === 0) saveActivity();
+    if (message.member) await syncRank(message.member);
+  }
   if (message.guild && message.mentions.has(client.user)) {
     const question = message.content.replace(/<@!?\d+>/g, '').trim();
     if (!(isStaff(message.member) || await isVerifiedUser(message.author.id))) return message.reply(CHANNEL_AI_NOTE + '\nVerify before chatting with me.').catch(() => {});
