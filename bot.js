@@ -19,6 +19,7 @@ const warnedRenew = new Set();
 const CONSOLE_CHANNEL_NAME = '🚫-console';
 const VOICE_PANEL_NAME = 'creat-voice-chat';
 const VERIFIED_ROLE = 'MDC verified';
+const UNVERIFIED_ROLE = 'MDC unverified';
 const ROBLOX_VERIFIED_ROLE = 'Roblox Verified';
 const OWNER_ROLE = 'Owner';
 const MOD_ROLE = 'Moderator';
@@ -310,7 +311,7 @@ client.on('interactionCreate', async interaction => {
     const code = options.getString('code').trim().toUpperCase();
     if (!isValidCode(code)) return interaction.reply({ content: 'Invalid code. Get a code from the verify site.', ephemeral: true });
     if (usedCodes.has(code)) return interaction.reply({ content: 'This code has already been used.', ephemeral: true });
-    usedCodes.add(code); verifiedUsers.add(user.id); if (role) await member.roles.add(role).catch(() => {});
+    usedCodes.add(code); verifiedUsers.add(user.id); if (role) await member.roles.add(role).catch(() => {}); const unverified = guild.roles.cache.find(r => r.name === UNVERIFIED_ROLE); if (unverified) await member.roles.remove(unverified).catch(() => {});
     await interaction.reply({ content: 'You have been successfully verified!', ephemeral: true });
     await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('Verification Successful').setDescription(user + ' verified.').setTimestamp());
     try { const dm = await user.send({ content: VERIFY_DM, components: [verifyDmRow()] }); setTimeout(() => dm.delete().catch(() => {}), DM_CLOSE_MS); } catch { console.log('Could not DM verified user.'); }
@@ -326,6 +327,12 @@ client.on('interactionCreate', async interaction => {
   if (commandName === 'mute') { const target = options.getUser('user'); const reason = options.getString('reason'); const minutes = options.getInteger('minutes') || 60; const targetMember = await guild.members.fetch(target.id).catch(() => null); if (!targetMember) return interaction.reply({ content: 'That user is not in this server.', ephemeral: true }); if (!targetMember.moderatable) return interaction.reply({ content: 'I cannot mute that user. Check role order.', ephemeral: true }); await targetMember.timeout(minutes * 60 * 1000, user.tag + ': ' + reason); await interaction.reply({ content: 'Muted **' + target.tag + '** for ' + minutes + ' minutes.', ephemeral: true }); await sendLog(new EmbedBuilder().setColor(0xF1C40F).setTitle('User Muted').setDescription(user + ' muted ' + target.tag).setTimestamp()); return; }
   if (commandName === 'unmute') { const target = options.getUser('user'); const targetMember = await guild.members.fetch(target.id).catch(() => null); if (!targetMember) return interaction.reply({ content: 'That user is not in this server.', ephemeral: true }); await targetMember.timeout(null); await interaction.reply({ content: 'Unmuted **' + target.tag + '**.', ephemeral: true }); await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('User Unmuted').setDescription(user + ' unmuted ' + target.tag).setTimestamp()); return; }
   if (commandName === 'unban') { const userId = options.getString('userid').trim(); const reason = options.getString('reason') || 'No reason'; if (!/^\d{17,20}$/.test(userId)) return interaction.reply({ content: 'Enter a valid user ID.', ephemeral: true }); if (userId === client.user.id) return interaction.reply({ content: 'This member is protected. Action refused.', ephemeral: true }); await guild.members.unban(userId, user.tag + ': ' + reason); await interaction.reply({ content: 'Unbanned <@' + userId + '>.', ephemeral: true }); await sendLog(new EmbedBuilder().setColor(0x57F287).setTitle('User Unbanned').setDescription(user + ' unbanned ' + userId).setTimestamp()); }
+});
+client.on('guildMemberAdd', async member => {
+  if (member.user.bot) return;
+  const role = member.guild.roles.cache.find(r => r.name === UNVERIFIED_ROLE);
+  if (!role) return;
+  await member.roles.add(role).catch((err) => console.error('Unverified role failed:', err.message));
 });
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   if (!oldMember.premiumSince && newMember.premiumSince) await thankBoost(newMember).catch((err) => console.error('Boost thanks failed:', err.message));
