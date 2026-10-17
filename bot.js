@@ -354,6 +354,34 @@ client.on('messageCreate', async message => {
   const count = warnings.get(message.author.id) || 0;
   if (count === 0) { warnings.set(message.author.id, 1); await message.delete().catch(() => {}); await message.channel.send(message.author + ', First Warning: Do not post links. Next time you will be banned.').catch(() => {}); } else { await message.delete().catch(() => {}); await message.member.ban({ reason: 'Repeated link/spam violation' }).catch(() => {}); }
 });
-http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(client.isReady() ? 'MDC Bot online as ' + client.user.tag : 'MDC Bot starting'); }).listen(PORT, '0.0.0.0');
+function publicStats() {
+  const mem = process.memoryUsage();
+  return {
+    name: client.isReady() ? client.user.tag : 'MDC Bot',
+    status: client.isReady() ? 'Online' : 'Starting',
+    ping: client.isReady() ? Math.round(client.ws.ping) : null,
+    uptime: formatUptime(Date.now() - startedAt),
+    servers: client.guilds.cache.size,
+    ai: AI_API_KEY ? 'Enabled' : 'Disabled',
+    model: AI_MODEL,
+    ram: mb(mem.rss),
+    updated: new Date().toISOString()
+  };
+}
+function statsHtml() {
+  const s = publicStats();
+  const dot = s.status === 'Online' ? '#57F287' : '#FEE75C';
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="15"><title>MDC Bot Status</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0e1116;color:#edeef0;font:16px/1.4 system-ui,sans-serif}.card{width:min(520px,92vw);background:#15172b;border:1px solid #23263f;border-radius:20px;padding:28px}h1{margin:0 0 6px;font-size:28px}.status{display:flex;align-items:center;gap:8px;color:#b6bad0;margin-bottom:18px}.dot{width:10px;height:10px;border-radius:99px;background:' + dot + ';box-shadow:0 0 12px ' + dot + '}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.item{background:#111325;border:1px solid #23263f;border-radius:14px;padding:14px}.label{color:#8c91ab;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.value{margin-top:4px;font-size:20px;font-weight:600}.note{margin-top:16px;color:#8c91ab;font-size:13px}</style></head><body><main class="card"><h1>MDC Bot</h1><div class="status"><span class="dot"></span>' + s.status + '</div><div class="grid"><div class="item"><div class="label">Ping</div><div class="value">' + (s.ping == null ? '-' : s.ping + ' ms') + '</div></div><div class="item"><div class="label">Uptime</div><div class="value">' + s.uptime + '</div></div><div class="item"><div class="label">Servers</div><div class="value">' + s.servers + '</div></div><div class="item"><div class="label">AI</div><div class="value">' + s.ai + '</div></div><div class="item"><div class="label">Model</div><div class="value">' + s.model + '</div></div><div class="item"><div class="label">RAM</div><div class="value">' + s.ram + '</div></div></div><p class="note">Public status only. Refreshes every 15 seconds. Updated ' + s.updated + '</p></main></body></html>';
+}
+const HTTP_PORT = Number(process.env.SERVER_PORT || process.env.PORT || PORT) || 3000;
+http.createServer((req, res) => {
+  if (req.url && req.url.startsWith('/api')) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify(publicStats()));
+  }
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(statsHtml());
+}).listen(HTTP_PORT, '0.0.0.0');
+console.log('Status page listening on ' + HTTP_PORT);
 if (!TOKEN) { console.error('TOKEN is missing.'); process.exit(1); }
 client.login(TOKEN).catch((err) => console.error('LOGIN FAILED:', err && err.message ? err.message : err));
