@@ -27,7 +27,17 @@ const PROTECTED_ROLES = ['Owner', 'Moderator', 'MDC BOT', 'MDC Bot'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const STAFF_TESTS = ['testlogs', 'testverify', 'teststatus', 'testai', 'testroblox', 'testrank', 'testboost', 'testboostboard'];
 const CHANNEL_AI_NOTE = '-# Mentioning the bot can look like spam in some channels. Use DMs for longer chats.';
-const usedCodes = new Set(); const verifiedUsers = new Set(); const warnings = new Map(); const robloxLinks = new Map(); const aiHistory = new Map(); const voiceRooms = new Map(); const userLang = new Map();
+const usedCodes = new Set(); const verifiedUsers = new Set(); const warnings = new Map(); const swearMutes = new Map();
+const SWEAR_FILE = './swear-mutes.json';
+function loadSwear() { try { for (const [id, n] of Object.entries(JSON.parse(fs.readFileSync(SWEAR_FILE, 'utf8')))) swearMutes.set(id, n); } catch {} }
+function saveSwear() { try { fs.writeFileSync(SWEAR_FILE, JSON.stringify(Object.fromEntries(swearMutes))); } catch {} }
+const SWEAR_MINUTES = [5, 15, 30, 60, 360, 1440, 10080];
+const SWEAR_WORDS = ['fuck','fucking','fucker','shit','bitch','asshole','bastard','dick','pussy','slut','whore','cunt','nigger','faggot','amk','aq','sik','siktir','orospu','piç','yarrak','göt','sikerim','sikeyim'];
+function hasSwear(text) {
+  const clean = String(text || '').toLowerCase().replace(/[^a-z0-9çğıöşü]/g, ' ');
+  const words = clean.split(/\s+/).filter(Boolean);
+  return words.some(w => SWEAR_WORDS.includes(w));
+} const robloxLinks = new Map(); const aiHistory = new Map(); const voiceRooms = new Map(); const userLang = new Map();
 const LANGS = [{id:'en',name:'English'},{id:'tr',name:'Türkçe'},{id:'de',name:'Deutsch'},{id:'es',name:'Español'},{id:'fr',name:'Français'},{id:'ru',name:'Русский'},{id:'ar',name:'العربية'},{id:'pt',name:'Português'}];
 const LANG_FILE = './language-prefs.json';
 function loadLang() { try { for (const [id, lang] of Object.entries(JSON.parse(fs.readFileSync(LANG_FILE, 'utf8')))) userLang.set(id, lang); } catch {} }
@@ -199,6 +209,16 @@ async function ensureVoicePanel() {
     await channel.send({ embeds: [new EmbedBuilder().setColor(0x5865F2).setTitle('Create a voice chat').setDescription('Press the button and set the room yourself.\n\nName, user limit, bitrate, and private room.')], components: [voicePanelRow()] }).catch((err) => console.error('Voice panel failed:', err.message));
   }
 }
+async function ensureRulesPanel() {
+  for (const guild of client.guilds.cache.values()) {
+    const channel = guild.channels.cache.find(c => c.isTextBased() && (c.name.includes('rules') || c.name.includes('❌')));
+    if (!channel) continue;
+    const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+    if (messages && messages.some(m => m.author.id === client.user.id && m.embeds[0] && m.embeds[0].title === 'Server rules')) continue;
+    const embed = new EmbedBuilder().setColor(0xED4245).setTitle('Server rules').setDescription('These things are not allowed on this server.\n\n1. No swearing or toxic language.\n2. No spam, flooding, or repeated messages.\n3. No advertising, invites, or random links.\n4. No NSFW or adult content.\n5. No harassment, bullying, or threats.\n6. No scams, phishing, or malware.\n7. No sharing private information.\n8. Respect staff and follow Discord Terms of Service.\n\nBreaking the rules can lead to a mute, kick, or ban. Swearing mutes get longer every time.').setTimestamp();
+    await channel.send({ embeds: [embed] }).catch((err) => console.error('Rules panel failed:', err.message));
+  }
+}
 function verifyDmRow() { return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_verify_dm').setLabel('Close').setStyle(ButtonStyle.Secondary)); }
 const VERIFY_DM = 'Thanks for joining the MDC Discord server.\n\nYour account is now verified. Read the rules, then jump into the channels.\n\nYou can also message me in this DM and I will reply.\n\nPress Close to remove this message. If you leave it, it will be deleted in 15 minutes.';
 const commands = [new SlashCommandBuilder().setName('rank').setDescription('Show your message count and rank'), new SlashCommandBuilder().setName('status').setDescription('Show the bot status'), new SlashCommandBuilder().setName('hostingstatus').setDescription('Staff: show Bot-Hosting server status'), new SlashCommandBuilder().setName('testlogs').setDescription('Staff test: send a log to the console channel'), new SlashCommandBuilder().setName('testverify').setDescription('Staff test: send the verify DM without verifying'), new SlashCommandBuilder().setName('teststatus').setDescription('Staff test: send the status report now'), new SlashCommandBuilder().setName('testai').setDescription('Staff test: check the AI reply'), new SlashCommandBuilder().setName('testrank').setDescription('Staff test: preview a rank role and emoji').addStringOption(o => o.setName('rank').setDescription('Rank name').setRequired(true).addChoices(...['silver','iron','gold','diamond','amethyst','emerald','GOD'].map(n => ({ name: n, value: n })))).addUserOption(o => o.setName('user').setDescription('Member to preview')), new SlashCommandBuilder().setName('testboost').setDescription('Staff test: play the boost thank animation').addUserOption(o => o.setName('user').setDescription('Member to thank')), new SlashCommandBuilder().setName('testboostboard').setDescription('Staff test: refresh the boost board'), new SlashCommandBuilder().setName('testroblox').setDescription('Staff test: look up a Roblox name without linking').addStringOption(o => o.setName('username').setDescription('Roblox display name').setRequired(true)), new SlashCommandBuilder().setName('verify').setDescription('Verify your account with a code from the MDC verify site').addStringOption(o => o.setName('code').setDescription('Verification code from the site').setRequired(true)), new SlashCommandBuilder().setName('linkroblox').setDescription('Link a real Roblox account').addStringOption(o => o.setName('username').setDescription('Your Roblox display name').setRequired(true)), new SlashCommandBuilder().setName('unlinkroblox').setDescription('Unlink your Roblox account'), new SlashCommandBuilder().setName('roblox').setDescription('Check linked Roblox account of a user').addUserOption(o => o.setName('user').setDescription('The user to check').setRequired(false)), new SlashCommandBuilder().setName('ban').setDescription('Ban a member').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addUserOption(o => o.setName('user').setDescription('Member to ban').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Ban reason').setRequired(true)), new SlashCommandBuilder().setName('kick').setDescription('Kick a member').setDefaultMemberPermissions(PermissionFlagsBits.KickMembers).addUserOption(o => o.setName('user').setDescription('Member to kick').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Kick reason').setRequired(true)), new SlashCommandBuilder().setName('mute').setDescription('Timeout a member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('user').setDescription('Member to mute').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Mute reason').setRequired(true)).addIntegerOption(o => o.setName('minutes').setDescription('Timeout minutes (default 60)').setMinValue(1).setMaxValue(40320)), new SlashCommandBuilder().setName('unmute').setDescription('Remove a timeout').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('user').setDescription('Member to unmute').setRequired(true)), new SlashCommandBuilder().setName('unban').setDescription('Unban a user by ID').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addStringOption(o => o.setName('userid').setDescription('User ID to unban').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Unban reason').setRequired(false))].map(cmd => cmd.toJSON());
@@ -211,8 +231,10 @@ client.once('clientReady', async () => {
   loadLang();
   loadActivity();
   loadBoosts();
+  loadSwear();
   await ensureVoicePanel();
   await ensureLanguagePanel();
+  await ensureRulesPanel();
   setInterval(() => checkVoiceRooms().catch((err) => console.error('Voice check failed:', err.message)), 60 * 1000);
   await updateStatusBoard();
   setInterval(() => updateStatusBoard().catch((err) => console.error('Status board failed:', err.message)), 60 * 1000);
@@ -356,6 +378,17 @@ client.on('messageCreate', async message => {
   }
   if (!message.guild) { if (!(await isVerifiedUser(message.author.id))) return message.reply('Verify in the server before chatting with me.').catch(() => {}); try { await message.channel.sendTyping(); await message.reply(await askAi(message.author.id, message.content || '')); } catch { await message.reply('I could not answer right now.').catch(() => {}); } return; }
   if (!message.member || isProtected(message.member)) return;
+  if (hasSwear(message.content)) {
+    const times = (swearMutes.get(message.author.id) || 0) + 1;
+    swearMutes.set(message.author.id, times);
+    saveSwear();
+    const minutes = SWEAR_MINUTES[Math.min(times - 1, SWEAR_MINUTES.length - 1)];
+    await message.delete().catch(() => {});
+    if (message.member.moderatable) await message.member.timeout(minutes * 60 * 1000, 'Swearing #' + times).catch(() => {});
+    await message.channel.send(message.author + ', do not swear. You are muted for **' + minutes + ' minutes**. Next time will be longer.').catch(() => {});
+    await sendToConsole({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('Swear mute').setDescription(message.author + ' muted for ' + minutes + ' minutes. Offense #' + times + '.').setTimestamp()] });
+    return;
+  }
   const content = message.content.toLowerCase();
   if (!['http://', 'https://', 'discord.gg', 'discord.com/invite'].some(w => content.includes(w))) return;
   const count = warnings.get(message.author.id) || 0;
