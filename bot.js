@@ -339,7 +339,7 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ content: 'Test boost animation posted. No boost was counted.', ephemeral: true });
     }
     if (commandName === 'testboostboard') { await updateBoostBoard(guild); return interaction.reply({ content: 'Boost board refreshed.', ephemeral: true }); }
-    if (commandName === 'postrules') { await ensureRulesPanel(true); return interaction.reply({ content: 'Rules message posted. If the channel was not found, check the bot console.', ephemeral: true }); }
+    if (commandName === 'postrules') { const sent = await interaction.channel.send({ embeds: [rulesEmbed()] }).catch(() => null); return interaction.reply({ content: sent ? 'Rules posted in this channel.' : 'Could not post here. Check bot permissions.', ephemeral: true }); }
     if (commandName === 'testroblox') { await interaction.deferReply({ ephemeral: true }); try { const roblox = await lookupRoblox(options.getString('username')); if (!roblox) return interaction.editReply('Not found. No account was linked.'); return interaction.editReply('Found **' + (roblox.displayName || roblox.name) + '**. No account was linked.'); } catch { return interaction.editReply('Roblox lookup failed.'); } }
   }
   if (commandName === 'verify') {
