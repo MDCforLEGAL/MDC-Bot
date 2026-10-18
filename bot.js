@@ -248,7 +248,6 @@ client.once('clientReady', async () => {
   loadSwear();
   await ensureVoicePanel();
   await ensureLanguagePanel();
-  setTimeout(() => ensureRulesPanel().catch((err) => console.error('Rules panel failed:', err.message)), 8000);
   setInterval(() => checkVoiceRooms().catch((err) => console.error('Voice check failed:', err.message)), 60 * 1000);
   await updateStatusBoard();
   setInterval(() => updateStatusBoard().catch((err) => console.error('Status board failed:', err.message)), 60 * 1000);
