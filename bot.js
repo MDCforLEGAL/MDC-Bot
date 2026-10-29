@@ -481,7 +481,7 @@ client.on('messageCreate', async message => {
     if (stats.count % 10 === 0) saveActivity();
     if (message.member) await syncRank(message.member);
   }
-  if (message.guild && message.mentions.has(client.user)) {
+  if (message.guild && message.mentions.users.has(client.user.id) && !message.mentions.everyone) {
     const question = message.content.replace(/<@!?\d+>/g, '').trim();
     if (!(isStaff(message.member) || await isVerifiedUser(message.author.id))) return message.reply(CHANNEL_AI_NOTE + '\nVerify before chatting with me.').catch(() => {});
     if (!question) return message.reply(CHANNEL_AI_NOTE + '\nAdd a question after the mention.').catch(() => {});
