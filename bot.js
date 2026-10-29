@@ -241,12 +241,22 @@ client.on('error', (err) => console.error('[client error]', err));
 client.on('shardError', (err) => console.error('[shard error]', err));
 
 const VERIFY_SITE = 'https://mdcforlegal.github.io/MDC-VERIFY/';
+function isMainVerifyChannel(channel) {
+  const name = channel.name.toLowerCase();
+  return channel.isTextBased() && (name === 'verify' || name === '✅️verify' || name === '✅verify');
+}
 async function ensureVerifyPanel() {
   for (const guild of client.guilds.cache.values()) {
-    const channel = guild.channels.cache.find(c => c.isTextBased() && c.name.toLowerCase().includes('verify'));
+    const wrong = guild.channels.cache.filter(c => c.isTextBased() && c.name.toLowerCase().includes('verify') && !isMainVerifyChannel(c));
+    for (const channel of wrong.values()) {
+      const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+      const old = messages && messages.find(m => m.author.id === client.user.id && m.content.includes('Verify your account'));
+      if (old) await old.delete().catch(() => {});
+    }
+    const channel = guild.channels.cache.find(isMainVerifyChannel);
     if (!channel) continue;
     const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
-    const existing = messages && messages.find(m => m.author.id === client.user.id && m.components.length);
+    const existing = messages && messages.find(m => m.author.id === client.user.id && m.content.includes('Verify your account'));
     const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('Verify').setStyle(ButtonStyle.Link).setURL(VERIFY_SITE));
     const payload = { content: '**Verify your account**\n\nPress the button to open the verify site.\nConnect your Discord account there. The bot will check your account, then you will be verified.', components: [row] };
     if (existing) await existing.edit(payload).catch(() => {});
