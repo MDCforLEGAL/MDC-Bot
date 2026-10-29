@@ -260,6 +260,17 @@ async function ensureVerifyPanel() {
     else await channel.send(payload).catch(() => {});
   }
 }
+
+const ROBLOX_CHANNEL_ID = '1516453342161670284';
+async function ensureRobloxPanel() {
+  const channel = await client.channels.fetch(ROBLOX_CHANNEL_ID).catch(() => null);
+  if (!channel || !channel.isTextBased()) return;
+  const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+  const existing = messages && messages.find(m => m.author.id === client.user.id && m.content.includes('Link your Roblox account'));
+  const payload = { content: '**Link your Roblox account**\n\nUse these commands:\n\n`/linkroblox` — link your Roblox account\n`/unlinkroblox` — remove the link\n`/roblox` — check a linked Roblox account' };
+  if (existing) await existing.edit(payload).catch(() => {});
+  else await channel.send(payload).catch(() => {});
+}
 client.once('clientReady', async () => {
   console.log('Logged in as ' + client.user.tag);
   console.log(AI_API_KEY ? 'AI chat enabled.' : 'AI chat disabled. AI_API_KEY is missing.');
@@ -269,6 +280,7 @@ client.once('clientReady', async () => {
   loadSwear();
   await ensureVoicePanel();
   await ensureVerifyPanel();
+  await ensureRobloxPanel();
   await ensureLanguagePanel();
   setInterval(() => checkVoiceRooms().catch((err) => console.error('Voice check failed:', err.message)), 60 * 1000);
   await updateStatusBoard();
