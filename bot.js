@@ -278,7 +278,7 @@ function robloxPanelPayload() {
     new ButtonBuilder().setCustomId('unlink_roblox').setLabel('Unlink Roblox').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('check_roblox').setLabel('Check Roblox').setStyle(ButtonStyle.Primary)
   );
-  return { content: '**Link your Roblox account**\n\nUse the buttons below.\nLink and Check will ask you to type the Roblox name.', components: [row] };
+  return { content: '**Link your Roblox account**\n\nUse the buttons below.\nLink asks for your Roblox name. Check shows your verified account.', components: [row] };
 }
 async function ensureRobloxPanel() {
   const channel = await client.channels.fetch(ROBLOX_CHANNEL_ID).catch((err) => { console.error('Roblox channel fetch failed:', err && err.message ? err.message : err); return null; });
@@ -330,8 +330,8 @@ client.on('interactionCreate', async interaction => {
     return interaction.showModal(modal);
   }
   if (interaction.isButton() && interaction.customId === 'check_roblox') {
-    const modal = new ModalBuilder().setCustomId('check_roblox_modal').setTitle('Check Roblox').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('username').setLabel('Roblox username, empty for yours').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(32)));
-    return interaction.showModal(modal);
+    const linked = robloxLinks.get(interaction.user.id);
+    return interaction.reply({ content: linked ? 'Your verified Roblox account is **' + linked + '**.' : 'You do not have a verified Roblox account.', ephemeral: true });
   }
   if (interaction.isButton() && interaction.customId === 'unlink_roblox') {
     if (!robloxLinks.has(interaction.user.id)) return interaction.reply({ content: 'You do not have a Roblox account linked.', ephemeral: true });
