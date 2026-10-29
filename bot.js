@@ -267,9 +267,19 @@ async function ensureRobloxPanel() {
   if (!channel || !channel.isTextBased()) return;
   const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
   const existing = messages && messages.find(m => m.author.id === client.user.id && m.content.includes('Link your Roblox account'));
-  const payload = { content: '**Link your Roblox account**\n\nUse these commands:\n\n`/linkroblox` — link your Roblox account\n`/unlinkroblox` — remove the link\n`/roblox` — check a linked Roblox account' };
-  if (existing) await existing.edit(payload).catch(() => {});
-  else await channel.send(payload).catch(() => {});
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('link_roblox').setLabel('Link Roblox').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('unlink_roblox').setLabel('Unlink Roblox').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('check_roblox').setLabel('Check Roblox').setStyle(ButtonStyle.Primary)
+  );
+  const payload = { content: '**Link your Roblox account**\n\nPress a button. Link and Check will ask for the Roblox name.', components: [row] };
+  try {
+    if (existing) await existing.edit(payload);
+    else await channel.send(payload);
+    console.log('Roblox panel posted in ' + channel.id);
+  } catch (err) {
+    console.error('Roblox panel failed:', err && err.message ? err.message : err);
+  }
 }
 client.once('clientReady', async () => {
   console.log('Logged in as ' + client.user.tag);
@@ -301,6 +311,52 @@ client.on('interactionCreate', async interaction => {
     return interaction.reply({ content: 'Language set to **' + langName(lang) + '**. You can change it any time.', ephemeral: true });
   }
   if (interaction.isButton() && interaction.customId === 'close_verify_dm') { await interaction.message.delete().catch(() => {}); return; }
+  if (interaction.isButton() && interaction.customId === 'link_roblox') {
+    const modal = new ModalBuilder().setCustomId('link_roblox_modal').setTitle('Link Roblox').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('username').setLabel('Roblox username').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(32)));
+    return interaction.showModal(modal);
+  }
+  if (interaction.isButton() && interaction.customId === 'check_roblox') {
+    const modal = new ModalBuilder().setCustomId('check_roblox_modal').setTitle('Check Roblox').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('username').setLabel('Roblox username, empty for yours').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(32)));
+    return interaction.showModal(modal);
+  }
+  if (interaction.isButton() && interaction.customId === 'unlink_roblox') {
+    if (!robloxLinks.has(interaction.user.id)) return interaction.reply({ content: 'You do not have a Roblox account linked.', ephemeral: true });
+    const oldName = robloxLinks.get(interaction.user.id);
+    robloxLinks.delete(interaction.user.id);
+    const role = interaction.guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
+    if (role) await interaction.member.roles.remove(role).catch(() => {});
+    if (!isStaff(interaction.member)) await interaction.member.setNickname(null).catch(() => {});
+    await syncRank(interaction.member);
+    return interaction.reply({ content: 'Unlinked Roblox account: **' + oldName + '**', ephemeral: true });
+  }
+  if (interaction.isModalSubmit() && interaction.customId === 'link_roblox_modal') {
+    const username = interaction.fields.getTextInputValue('username').trim();
+    if (robloxLinks.has(interaction.user.id)) return interaction.reply({ content: 'You already have a Roblox account linked. Unlink first.', ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+    let roblox; try { roblox = await lookupRoblox(username); } catch { return interaction.editReply('Could not reach Roblox. Try again.'); }
+    if (!roblox) return interaction.editReply('That Roblox account name was not found.');
+    const shown = roblox.displayName || roblox.name;
+    robloxLinks.set(interaction.user.id, shown);
+    const role = interaction.guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
+    if (role) await interaction.member.roles.add(role).catch(() => {});
+    let nickNote = '';
+    if (isStaff(interaction.member)) nickNote = ' Staff nickname was left unchanged.';
+    else { try { await interaction.member.setNickname(shown.slice(0, 32)); } catch { nickNote = ' Nickname was not changed.'; } }
+    await syncRank(interaction.member);
+    await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(interaction.user + ' linked **' + shown + '**').setTimestamp());
+    return interaction.editReply('Linked Roblox account **' + shown + '**.' + nickNote);
+  }
+  if (interaction.isModalSubmit() && interaction.customId === 'check_roblox_modal') {
+    const username = interaction.fields.getTextInputValue('username').trim();
+    if (!username) {
+      const linked = robloxLinks.get(interaction.user.id);
+      return interaction.reply({ content: linked ? 'Your linked Roblox account is **' + linked + '**.' : 'You do not have a Roblox account linked.', ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    let roblox; try { roblox = await lookupRoblox(username); } catch { return interaction.editReply('Could not reach Roblox. Try again.'); }
+    if (!roblox) return interaction.editReply('That Roblox account name was not found.');
+    return interaction.editReply('Found Roblox account **' + (roblox.displayName || roblox.name) + '**.');
+  }
   if (interaction.isButton() && interaction.customId === 'create_voice') {
     const modal = new ModalBuilder().setCustomId('create_voice_modal').setTitle('Create voice chat').addComponents(
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Room name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80)),
