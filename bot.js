@@ -151,7 +151,17 @@ function statusEmbed() { return new EmbedBuilder().setColor(0x5865F2).setTitle('
 async function sendToConsole(payload) { for (const guild of client.guilds.cache.values()) { const channel = guild.channels.cache.find(c => c.name === CONSOLE_CHANNEL_NAME || c.name.includes('console')); if (channel) await channel.send(payload).catch(() => {}); } }
 async function isVerifiedUser(userId) { if (verifiedUsers.has(userId)) return true; for (const guild of client.guilds.cache.values()) { const member = await guild.members.fetch(userId).catch(() => null); const role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE); if (member && role && member.roles.cache.has(role.id)) { verifiedUsers.add(userId); return true; } } return false; }
 async function askAi(userId, text) { if (!AI_API_KEY) return 'AI chat is not set up yet.'; const history = aiHistory.get(userId) || []; history.push({ role: 'user', content: String(text || '').slice(0, 500) }); const trimmed = history.slice(-8); const chosen = langName(userLang.get(userId)); const res = await fetch(AI_BASE_URL + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + AI_API_KEY, 'HTTP-Referer': 'https://mdcforlegal.github.io/MDC-VERIFY/', 'X-Title': 'MDC Bot' }, body: JSON.stringify({ model: AI_MODEL, max_tokens: 300, messages: [{ role: 'system', content: 'You are MDC Bot, a friendly Discord assistant. Reply in ' + (chosen || 'the same language the user used') + '. Keep it short and appropriate for all ages. Do not discuss sexual content, violence, or illegal activity.' }, ...trimmed] }) }); if (!res.ok) return 'I could not answer right now. Try again in a moment.'; const data = await res.json(); const safe = ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || 'I do not have an answer.').slice(0, 1700); trimmed.push({ role: 'assistant', content: safe }); aiHistory.set(userId, trimmed.slice(-8)); return safe; }
-async function lookupRoblox(input) { const query = input.trim(); const byUsername = await fetch('https://users.roblox.com/v1/usernames/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: [query], excludeBannedUsers: true }) }); if (byUsername.ok) { const data = await byUsername.json(); if (data.data && data.data.length) return data.data[0]; } const search = await fetch('https://users.roblox.com/v1/users/search?keyword=' + encodeURIComponent(query) + '&limit=10'); if (!search.ok) throw new Error('Roblox API failed'); const found = await search.json(); const lowered = query.toLowerCase(); return (found.data || []).find(u => (u.displayName || '').toLowerCase() === lowered || (u.name || '').toLowerCase() === lowered) || null; }
+async function lookupRoblox(input) {
+  const query = input.trim();
+  const opts = { signal: AbortSignal.timeout(8000) };
+  const byUsername = await fetch('https://users.roblox.com/v1/usernames/users', { ...opts, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: [query], excludeBannedUsers: true }) });
+  if (byUsername.ok) { const data = await byUsername.json(); if (data.data && data.data.length) return data.data[0]; }
+  const search = await fetch('https://users.roblox.com/v1/users/search?keyword=' + encodeURIComponent(query) + '&limit=10', opts);
+  if (!search.ok) throw new Error('Roblox API failed');
+  const found = await search.json();
+  const lowered = query.toLowerCase();
+  return (found.data || []).find(u => (u.displayName || '').toLowerCase() === lowered || (u.name || '').toLowerCase() === lowered) || null;
+}
 async function bhGet(path) { const res = await fetch('https://bot-hosting.net/api/v1' + path, { headers: { Authorization: 'Bearer ' + BH_API_KEY } }); if (!res.ok) throw new Error('Bot-Hosting API ' + res.status); return res.json(); }
 function firstDate(values) { for (const value of values) { if (!value) continue; const time = new Date(value).getTime(); if (!Number.isNaN(time)) return time; } return null; }
 async function hostingInfo() { if (!BH_API_KEY) throw new Error('BH_API_KEY is missing.'); const listed = await bhGet('/deployments'); const deployments = listed.deployments || listed.items || listed.data || []; const deployment = deployments.find(d => d.id === BH_DEPLOYMENT_ID) || deployments[0]; if (!deployment) throw new Error('No deployment found.'); const [account, resources] = await Promise.all([bhGet('/account').catch(() => null), bhGet('/deployments/' + deployment.id + '/resources').catch(() => null)]); return { deployment, account, resources, renewAt: firstDate([BH_RENEW_AT, account && account.plan && (account.plan.renewsAt || account.plan.expiresAt || account.plan.periodEnd), deployment.renewsAt, deployment.expiresAt]) }; }
@@ -337,18 +347,23 @@ client.on('interactionCreate', async interaction => {
     const username = interaction.fields.getTextInputValue('username').trim();
     if (robloxLinks.has(interaction.user.id)) return interaction.reply({ content: 'You already have a Roblox account linked. Unlink first.', ephemeral: true });
     await interaction.deferReply({ ephemeral: true });
-    let roblox; try { roblox = await lookupRoblox(username); } catch { return interaction.editReply('Could not reach Roblox. Try again.'); }
-    if (!roblox) return interaction.editReply('That Roblox account name was not found.');
-    const shown = roblox.displayName || roblox.name;
-    robloxLinks.set(interaction.user.id, shown);
-    const role = interaction.guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
-    if (role) await interaction.member.roles.add(role).catch(() => {});
-    let nickNote = '';
-    if (isStaff(interaction.member)) nickNote = ' Staff nickname was left unchanged.';
-    else { try { await interaction.member.setNickname(shown.slice(0, 32)); } catch { nickNote = ' Nickname was not changed.'; } }
-    await syncRank(interaction.member);
-    await sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(interaction.user + ' linked **' + shown + '**').setTimestamp());
-    return interaction.editReply('Linked Roblox account **' + shown + '**.' + nickNote);
+    try {
+      const roblox = await lookupRoblox(username);
+      if (!roblox) return interaction.editReply('That Roblox account name was not found.');
+      const shown = roblox.displayName || roblox.name;
+      robloxLinks.set(interaction.user.id, shown);
+      const role = interaction.guild.roles.cache.find(r => r.name === ROBLOX_VERIFIED_ROLE);
+      if (role) await interaction.member.roles.add(role).catch(() => {});
+      let nickNote = '';
+      if (isStaff(interaction.member)) nickNote = ' Staff nickname was left unchanged.';
+      else { try { await interaction.member.setNickname(shown.slice(0, 32)); } catch { nickNote = ' Nickname was not changed.'; } }
+      syncRank(interaction.member).catch(() => {});
+      sendLog(new EmbedBuilder().setColor(0x5865F2).setTitle('Roblox Account Linked').setDescription(interaction.user + ' linked **' + shown + '**').setTimestamp()).catch(() => {});
+      return interaction.editReply('Linked Roblox account **' + shown + '**.' + nickNote);
+    } catch (err) {
+      console.error('Link Roblox failed:', err && err.message ? err.message : err);
+      return interaction.editReply('Roblox did not answer in time. Try again.');
+    }
   }
   if (interaction.isModalSubmit() && interaction.customId === 'check_roblox_modal') {
     const username = interaction.fields.getTextInputValue('username').trim();
